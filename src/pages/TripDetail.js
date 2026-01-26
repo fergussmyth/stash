@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
+import shareIcon from "../assets/icons/share.png";
 
 function cleanAirbnbUrl(url) {
   try {
@@ -33,8 +34,16 @@ function splitTitleParts(title, fallbackUrl) {
 
 export default function TripDetail() {
   const { id } = useParams();
-  const { tripsById, removeItem, updateItemNote, updateItemTitle, enableShare, disableShare } =
-    useTrips();
+  const {
+    tripsById,
+    removeItem,
+    updateItemNote,
+    updateItemTitle,
+    enableShare,
+    disableShare,
+    user,
+    loading,
+  } = useTrips();
   const [sortMode, setSortMode] = useState("newest");
   const [editingId, setEditingId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
@@ -42,9 +51,21 @@ export default function TripDetail() {
   const [compareMode, setCompareMode] = useState(false);
   const [compareSelected, setCompareSelected] = useState(new Set());
   const [compareNotice, setCompareNotice] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportMsg, setExportMsg] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
+  const [shareUrlOverride, setShareUrlOverride] = useState("");
 
   const trip = tripsById.get(id);
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
+  const shareUrlFinal = shareUrlOverride || shareUrl;
+
+  useEffect(() => {
+    if (trip?.shareId && shareUrlOverride) {
+      setShareUrlOverride("");
+    }
+  }, [trip?.shareId, shareUrlOverride]);
   const sortedItems = useMemo(() => {
     if (!trip?.items) return [];
     const items = [...trip.items];
@@ -129,6 +150,130 @@ export default function TripDetail() {
     setCompareSelected(new Set());
   }
 
+  function getItemTitle(item) {
+    return (item.title || "").trim() || item.airbnbUrl;
+  }
+
+  function setCopiedMessage() {
+    setExportMsg("Copied!");
+    setTimeout(() => setExportMsg(""), 1500);
+  }
+
+  function handleCopyLinks() {
+    const text = sortedItems.map((item) => item.airbnbUrl).join("\n");
+    navigator.clipboard.writeText(text);
+    setCopiedMessage();
+    setExportOpen(false);
+  }
+
+  function handleCopyShortlist() {
+    const text = sortedItems
+      .map((item) => {
+        const title = getItemTitle(item);
+        const note = (item.note || "").trim();
+        return note
+          ? `- ${title} (${item.airbnbUrl}) — ${note}`
+          : `- ${title} (${item.airbnbUrl})`;
+      })
+      .join("\n");
+    navigator.clipboard.writeText(text);
+    setCopiedMessage();
+    setExportOpen(false);
+  }
+
+  function escapeCsv(value) {
+    const text = value == null ? "" : String(value);
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function handleDownloadCsv() {
+    const header = ["title", "url", "note", "sourceText", "addedAt"].join(",");
+    const rows = sortedItems.map((item) => {
+      return [
+        escapeCsv(getItemTitle(item)),
+        escapeCsv(item.airbnbUrl),
+        escapeCsv(item.note || ""),
+        escapeCsv(item.sourceText || ""),
+        escapeCsv(item.addedAt || ""),
+      ].join(",");
+    });
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${trip.name || "trip"}-shortlist.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setExportOpen(false);
+  }
+
+  async function handleToggleShare() {
+    if (!trip?.shareId) {
+      const newShareId = await enableShare(trip.id);
+      if (newShareId) {
+        setShareUrlOverride(`${window.location.origin}/share/${newShareId}`);
+      }
+    }
+    const targetUrl = shareUrlOverride || shareUrl;
+    if (targetUrl && navigator.share) {
+      try {
+        await navigator.share({
+          title: trip.name,
+          text: `${trip.name} shortlist`,
+          url: targetUrl,
+        });
+        return;
+      } catch {
+        // fall back to panel if share was cancelled or failed
+      }
+    }
+    setShareOpen((v) => !v);
+    setExportOpen(false);
+  }
+
+  function setShareMessage(text) {
+    setShareMsg(text);
+    setTimeout(() => setShareMsg(""), 1500);
+  }
+
+  async function handleCopyShareLink() {
+    if (!shareUrlFinal) return;
+    await navigator.clipboard.writeText(shareUrlFinal);
+    setShareMessage("Copied!");
+    setShareOpen(false);
+  }
+
+
+  if (!user && !loading) {
+    return (
+      <div className="page">
+        <div className="card glow">
+          <h1>
+            Trip <span>Access</span>
+          </h1>
+
+          <div className="content">
+            <p className="muted">Sign in to view and edit your trips.</p>
+            <div className="navRow">
+              <Link className="miniBtn linkBtn" to="/login">
+                Sign in
+              </Link>
+              <Link className="miniBtn linkBtn" to="/">
+                Extractor
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // If trip doesn't exist (bad URL / deleted), show a friendly message
   if (!trip) {
     return (
@@ -158,9 +303,16 @@ export default function TripDetail() {
   return (
     <div className="page">
       <div className="card glow">
-        <h1>
-          {trip.name} <span>Shortlist</span>
-        </h1>
+        <div className="tripTitleRow">
+          <h1>
+            {trip.name} <span>Shortlist</span>
+          </h1>
+          {trip.items.length > 0 && (
+            <button className="iconBtn bare" type="button" onClick={handleToggleShare}>
+              <img className="iconImg" src={shareIcon} alt="Share" />
+            </button>
+          )}
+        </div>
 
         <div className="content">
           <div className="navRow">
@@ -175,31 +327,81 @@ export default function TripDetail() {
                 {compareEnabled ? "Done" : "Compare"}
               </button>
             )}
-          </div>
-
-          <div className="shareBox">
-            {!trip.shareId ? (
-              <button className="miniBtn" type="button" onClick={() => enableShare(trip.id)}>
-                Enable sharing
+            {trip.items.length > 0 && (
+              <button
+                className="miniBtn"
+                type="button"
+                onClick={() => {
+                  setExportOpen((v) => !v);
+                  setShareOpen(false);
+                }}
+              >
+                {exportOpen ? "Close Export" : "Export"}
               </button>
-            ) : (
-              <>
-                <div className="shareUrl">{shareUrl}</div>
-                <div className="shareActions">
-                  <button
-                    className="miniBtn"
-                    type="button"
-                    onClick={() => navigator.clipboard.writeText(shareUrl)}
-                  >
-                    Copy link
-                  </button>
-                  <button className="miniBtn danger" type="button" onClick={() => disableShare(trip.id)}>
-                    Disable sharing
-                  </button>
-                </div>
-              </>
             )}
           </div>
+
+          {shareOpen && (trip.shareId || shareUrlOverride) && (
+            <div className="sharePanel">
+              <div className="sharePanelRow">
+                <div className="shareLabel">Share</div>
+                {shareMsg && <div className="shareMsg">{shareMsg}</div>}
+              </div>
+              <div className="shareUrl">{shareUrlFinal}</div>
+              <div className="shareActions">
+                <button className="miniBtn" type="button" onClick={handleCopyShareLink}>
+                  Copy link
+                </button>
+                <a
+                  className="miniBtn linkBtn"
+                  href={`https://wa.me/?text=${encodeURIComponent(shareUrlFinal)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  WhatsApp
+                </a>
+                <a
+                  className="miniBtn linkBtn"
+                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrlFinal)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  X
+                </a>
+                <button
+                  className="miniBtn danger"
+                  type="button"
+                  onClick={() => {
+                    disableShare(trip.id);
+                    setShareUrlOverride("");
+                    setShareOpen(false);
+                  }}
+                >
+                  Disable
+                </button>
+              </div>
+            </div>
+          )}
+
+          {exportOpen && (
+            <div className="exportPanel">
+              <div className="exportHeader">
+                <div className="exportTitle">Export</div>
+                {exportMsg && <div className="exportMsg">{exportMsg}</div>}
+              </div>
+              <div className="exportActions">
+                <button className="miniBtn" type="button" onClick={handleCopyLinks}>
+                  Copy links
+                </button>
+                <button className="miniBtn" type="button" onClick={handleCopyShortlist}>
+                  Copy shortlist
+                </button>
+                <button className="miniBtn" type="button" onClick={handleDownloadCsv}>
+                  Download CSV
+                </button>
+              </div>
+            </div>
+          )}
 
           {trip.items.length === 0 ? (
             <p className="muted">

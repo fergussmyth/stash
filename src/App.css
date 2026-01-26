@@ -10,6 +10,7 @@ body {
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background: radial-gradient(circle at top, #1f2937 0%, #020617 60%);
   color: #ffffff;
+  overflow-x: hidden;
 }
 
 /* =========================
@@ -302,7 +303,8 @@ h1 span {
 ========================= */
 @media (max-width: 600px) {
   .card {
-    padding: 28px;
+    padding: 22px;
+    max-width: 100%;
   }
 
   h1 {
@@ -316,6 +318,24 @@ h1 span {
   .miniControls {
     flex-direction: column;
     gap: 10px;
+  }
+
+  .page {
+    padding: 20px 16px;
+  }
+
+  .topNav {
+    gap: 6px;
+    margin: 16px auto 10px;
+  }
+
+  .topNavLink {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .navRow {
+    justify-content: center;
   }
 
   .tripHeaderRow,
@@ -371,6 +391,11 @@ h1 span {
     justify-content: flex-start;
     flex-wrap: wrap;
   }
+
+  .importBox {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (min-width: 700px) {
@@ -399,6 +424,7 @@ h1 span {
   gap: 8px;
   z-index: 50;
   pointer-events: auto;
+  flex-wrap: wrap;
 }
 
 .topNavLink {
@@ -469,7 +495,54 @@ h1 span {
   margin-bottom: 10px;
 }
 
-.shareBox {
+.loginBox {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.authTabs {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.authTabs .miniBtn.activeTab {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
+.authDivider {
+  text-align: center;
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.authProviders {
+  display: grid;
+  gap: 10px;
+}
+
+.importBox {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.importText {
+  font-size: 13px;
+  color: rgba(226, 232, 240, 0.85);
+  font-weight: 700;
+}
+
+.sharePanel {
   margin: 12px 0 6px;
   padding: 12px;
   border-radius: 14px;
@@ -477,6 +550,28 @@ h1 span {
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
   display: grid;
   gap: 10px;
+}
+
+.sharePanelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.shareLabel {
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.shareMsg {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .shareUrl {
@@ -489,6 +584,44 @@ h1 span {
   display: inline-flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.exportPanel {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  display: grid;
+  gap: 10px;
+}
+
+.exportHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.exportTitle {
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.exportMsg {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.exportActions {
+  display: inline-flex;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -537,6 +670,60 @@ h1 span {
   margin-top: 14px;
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tripTitleRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tripTitleRow h1 {
+  margin: 0 0 28px;
+}
+
+.tripTitleRow .iconBtn.bare {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+}
+
+.iconBtn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.iconImg {
+  width: 20px;
+  height: 20px;
+  filter: brightness(0) invert(1);
+}
+
+.iconBtn.bare {
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.iconBtn.bare:hover {
+  background: transparent;
+  opacity: 0.85;
 }
 
 .muted {

@@ -24,7 +24,8 @@ function fallbackTitleForUrl(url) {
 }
 
 export default function Trips() {
-  const { trips, createTrip, deleteTrip } = useTrips();
+  const { trips, createTrip, deleteTrip, user, loading, localImportAvailable, importLocalTrips } =
+    useTrips();
 
   return (
     <div className="page">
@@ -34,12 +35,29 @@ export default function Trips() {
         </h1>
 
         <div className="content">
+          {!user && (
+            <div className="muted">
+              Sign in to create and sync trips across devices.
+            </div>
+          )}
+
+          {user && localImportAvailable && (
+            <div className="importBox">
+              <div className="importText">Local trips found on this device.</div>
+              <button className="miniBtn" type="button" onClick={importLocalTrips}>
+                Import local trips to cloud
+              </button>
+            </div>
+          )}
+
           <div className="tripCreate">
-            <TripCreate createTrip={createTrip} />
+            <TripCreate createTrip={createTrip} disabled={!user} />
           </div>
 
           <div className="tripList">
-            {trips.length === 0 ? (
+            {loading ? (
+              <p className="muted">Loading trips...</p>
+            ) : trips.length === 0 ? (
               <p className="muted">No trips yet. Create one and start saving links.</p>
             ) : (
               trips.map((t) => (
@@ -92,11 +110,11 @@ export default function Trips() {
   );
 }
 
-function TripCreate({ createTrip }) {
+function TripCreate({ createTrip, disabled }) {
   const [name, setName] = useState("");
 
-  function handleCreate() {
-    const id = createTrip(name);
+  async function handleCreate() {
+    const id = await createTrip(name);
     if (!id) return;
     setName("");
   }
@@ -108,8 +126,9 @@ function TripCreate({ createTrip }) {
         placeholder="New trip name (e.g. Paris weekend)"
         value={name}
         onChange={(e) => setName(e.target.value)}
+        disabled={disabled}
       />
-      <button className="secondary-btn" onClick={handleCreate}>
+      <button className="secondary-btn" onClick={handleCreate} disabled={disabled}>
         Create
       </button>
     </div>

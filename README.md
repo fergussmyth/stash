@@ -1,6 +1,6 @@
 # TripTok
 
-TripTok is a lightweight web app for turning messy TikTok (or social) comments into an Airbnb shortlist you can organize, compare, and share.
+TripTok is a lightweight web app for turning messy TikTok (or social) comments into an Airbnb shortlist you can organise, compare, and share.
 
 ## What it does
 Paste a comment full of links, extract Airbnb listings, and save them into trips. Each trip becomes a clean, structured shortlist with titles, notes, and quick actions.

@@ -1,18 +1,16 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "./useAuth";
 
 const STORAGE_KEY = "airbnb_trip_shortlists_v1";
 const TripsContext = createContext(null);
 
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-function makeShareId() {
-  return (
+function makeShareId(length = 12) {
+  const base =
     Math.random().toString(36).slice(2) +
     Math.random().toString(36).slice(2) +
-    Date.now().toString(36)
-  ).replace(/[^a-z0-9]/gi, "");
+    Date.now().toString(36);
+  return base.replace(/[^a-z0-9]/gi, "").slice(0, length);
 }
 
 function titleCase(input = "") {
@@ -33,33 +31,22 @@ function safeParse(json, fallback) {
 }
 
 export function TripsProvider({ children }) {
+  const { user, loading: authLoading } = useAuth();
   const [trips, setTrips] = useState([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [localImportAvailable, setLocalImportAvailable] = useState(false);
+  const [localTripsCache, setLocalTripsCache] = useState([]);
 
-  // load once on app start
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     const data = safeParse(raw, []);
-    setTrips(Array.isArray(data) ? data : []);
-    setHydrated(true);
+    const localTrips = Array.isArray(data) ? data : [];
+    setLocalTripsCache(localTrips);
   }, []);
 
-  // persist whenever trips changes
   useEffect(() => {
-    if (!hydrated) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
-  }, [trips, hydrated]);
-
-  // (optional but nice) keep in sync across tabs/windows
-  useEffect(() => {
-    function onStorage(e) {
-      if (e.key !== STORAGE_KEY) return;
-      const data = safeParse(e.newValue, []);
-      setTrips(Array.isArray(data) ? data : []);
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+    setLocalImportAvailable(!!user && localTripsCache.length > 0);
+  }, [user, localTripsCache]);
 
   const tripsById = useMemo(() => {
     const map = new Map();
@@ -67,99 +54,323 @@ export function TripsProvider({ children }) {
     return map;
   }, [trips]);
 
-  function createTrip(name) {
+  async function loadTrips() {
+    if (!user) {
+      setTrips([]);
+      return;
+    }
+    setLoading(true);
+
+    const { data: tripsData, error: tripsError } = await supabase
+      .from("trips")
+      .select("*")
+      .eq("owner_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (tripsError) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to load trips:", tripsError.message);
+      setTrips([]);
+      setLoading(false);
+      return;
+    }
+
+    const tripIds = tripsData.map((t) => t.id);
+    let itemsData = [];
+
+    if (tripIds.length > 0) {
+      const { data: items, error: itemsError } = await supabase
+        .from("trip_items")
+        .select("*")
+        .in("trip_id", tripIds)
+        .order("added_at", { ascending: false });
+
+      if (itemsError) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to load items:", itemsError.message);
+      } else {
+        itemsData = items || [];
+      }
+    }
+
+    const itemsByTrip = new Map();
+    for (const item of itemsData) {
+      const list = itemsByTrip.get(item.trip_id) || [];
+      list.push({
+        id: item.id,
+        airbnbUrl: item.url,
+        title: item.title,
+        note: item.note,
+        sourceText: item.source_text,
+        addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
+      });
+      itemsByTrip.set(item.trip_id, list);
+    }
+
+    const mapped = tripsData.map((t) => ({
+      id: t.id,
+      name: t.name,
+      createdAt: t.created_at,
+      items: itemsByTrip.get(t.id) || [],
+      shareId: t.share_id || "",
+      isShared: !!t.is_shared,
+    }));
+
+    setTrips(mapped);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    if (authLoading) return;
+    loadTrips();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authLoading]);
+
+  async function createTrip(name) {
     const trimmed = (name || "").trim();
-    if (!trimmed) return null;
+    if (!trimmed || !user) return null;
     const normalized = titleCase(trimmed);
 
+    const { data, error } = await supabase
+      .from("trips")
+      .insert({ owner_id: user.id, name: normalized })
+      .select("*")
+      .single();
+
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to create trip:", error.message);
+      return null;
+    }
+
     const trip = {
-      id: uid(),
-      name: normalized,
-      createdAt: Date.now(),
+      id: data.id,
+      name: data.name,
+      createdAt: data.created_at,
       items: [],
+      shareId: data.share_id || "",
+      isShared: !!data.is_shared,
     };
     setTrips((prev) => [trip, ...prev]);
     return trip.id;
   }
 
-  function deleteTrip(tripId) {
+  async function renameTrip(tripId, name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed || !user) return;
+    const normalized = titleCase(trimmed);
+    const { error } = await supabase
+      .from("trips")
+      .update({ name: normalized })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to rename trip:", error.message);
+      return;
+    }
+    setTrips((prev) => prev.map((t) => (t.id === tripId ? { ...t, name: normalized } : t)));
+  }
+
+  async function deleteTrip(tripId) {
+    if (!user) return;
+    await supabase.from("trip_items").delete().eq("trip_id", tripId).eq("owner_id", user.id);
+    const { error } = await supabase.from("trips").delete().eq("id", tripId).eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to delete trip:", error.message);
+      return;
+    }
     setTrips((prev) => prev.filter((t) => t.id !== tripId));
   }
 
-  function addItemToTrip(tripId, item) {
-    setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
+  async function addItemToTrip(tripId, item) {
+    if (!user) return;
+    const existingTrip = tripsById.get(tripId);
+    if (!existingTrip) return;
+    const exists = existingTrip.items.some((i) => i.airbnbUrl === item.airbnbUrl);
+    if (exists) return;
 
-        const exists = t.items.some((i) => i.airbnbUrl === item.airbnbUrl);
-        if (exists) return t;
-
-        return { ...t, items: [item, ...t.items] };
+    const { data, error } = await supabase
+      .from("trip_items")
+      .insert({
+        trip_id: tripId,
+        url: item.airbnbUrl,
+        title: item.title,
+        note: item.note,
+        source_text: item.sourceText,
+        added_at: new Date(item.addedAt || Date.now()).toISOString(),
       })
+      .select("*")
+      .single();
+
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to add item:", error.message);
+      return;
+    }
+
+    const mapped = {
+      id: data.id,
+      airbnbUrl: data.url,
+      title: data.title,
+      note: data.note,
+      sourceText: data.source_text,
+      addedAt: data.added_at ? new Date(data.added_at).getTime() : Date.now(),
+    };
+
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, items: [mapped, ...t.items] } : t))
     );
   }
 
-  function enableShare(tripId) {
+  async function removeItem(tripId, itemId) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trip_items")
+      .delete()
+      .eq("id", itemId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to remove item:", error.message);
+      return;
+    }
     setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
-        if (t.shareId) return t;
-        return { ...t, shareId: makeShareId() };
-      })
+      prev.map((t) => (t.id === tripId ? { ...t, items: t.items.filter((i) => i.id !== itemId) } : t))
     );
   }
 
-  function disableShare(tripId) {
+  async function updateItemNote(tripId, itemId, note) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trip_items")
+      .update({ note })
+      .eq("id", itemId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update note:", error.message);
+      return;
+    }
     setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
-        const { shareId, ...rest } = t;
-        return { ...rest };
-      })
+      prev.map((t) =>
+        t.id === tripId
+          ? { ...t, items: t.items.map((i) => (i.id === itemId ? { ...i, note } : i)) }
+          : t
+      )
     );
   }
 
-  function removeItem(tripId, itemId) {
+  async function updateItemTitle(tripId, itemId, title) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trip_items")
+      .update({ title })
+      .eq("id", itemId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update title:", error.message);
+      return;
+    }
     setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
-        return { ...t, items: t.items.filter((i) => i.id !== itemId) };
-      })
+      prev.map((t) =>
+        t.id === tripId
+          ? { ...t, items: t.items.map((i) => (i.id === itemId ? { ...i, title } : i)) }
+          : t
+      )
     );
   }
 
-  function updateItemNote(tripId, itemId, note) {
+  async function enableShare(tripId) {
+    if (!user) return;
+    const shareId = makeShareId(12);
+    const { error } = await supabase
+      .from("trips")
+      .update({ is_shared: true, share_id: shareId })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to enable share:", error.message);
+      return null;
+    }
     setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
-        return {
-          ...t,
-          items: t.items.map((i) => (i.id === itemId ? { ...i, note } : i)),
-        };
-      })
+      prev.map((t) => (t.id === tripId ? { ...t, shareId, isShared: true } : t))
+    );
+    return shareId;
+  }
+
+  async function disableShare(tripId) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trips")
+      .update({ is_shared: false, share_id: null })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to disable share:", error.message);
+      return;
+    }
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, shareId: "", isShared: false } : t))
     );
   }
 
-  function updateItemTitle(tripId, itemId, title) {
-    setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== tripId) return t;
-        return {
-          ...t,
-          items: t.items.map((i) => (i.id === itemId ? { ...i, title } : i)),
-        };
-      })
-    );
-  }
+  async function importLocalTrips() {
+    if (!user || localTripsCache.length === 0) return;
 
-  function clearAll() {
-    setTrips([]);
+    for (const localTrip of localTripsCache) {
+      const { data: tripData, error: tripError } = await supabase
+        .from("trips")
+        .insert({
+          owner_id: user.id,
+          name: localTrip.name || "Trip",
+          is_shared: !!localTrip.shareId,
+          share_id: localTrip.shareId || null,
+        })
+        .select("*")
+        .single();
+
+      if (tripError) {
+        // eslint-disable-next-line no-console
+        console.error("Import trip failed:", tripError.message);
+        continue;
+      }
+
+      const items = (localTrip.items || []).map((item) => ({
+        trip_id: tripData.id,
+        url: item.airbnbUrl,
+        title: item.title,
+        note: item.note,
+        source_text: item.sourceText,
+        added_at: new Date(item.addedAt || Date.now()).toISOString(),
+      }));
+
+      if (items.length > 0) {
+        const { error: itemsError } = await supabase.from("trip_items").insert(items);
+        if (itemsError) {
+          // eslint-disable-next-line no-console
+          console.error("Import items failed:", itemsError.message);
+        }
+      }
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+    setLocalTripsCache([]);
+    setLocalImportAvailable(false);
+    loadTrips();
   }
 
   const value = {
     trips,
     tripsById,
+    loading,
+    user,
     createTrip,
+    renameTrip,
     deleteTrip,
     addItemToTrip,
     removeItem,
@@ -167,7 +378,8 @@ export function TripsProvider({ children }) {
     updateItemTitle,
     enableShare,
     disableShare,
-    clearAll,
+    localImportAvailable,
+    importLocalTrips,
   };
 
   return <TripsContext.Provider value={value}>{children}</TripsContext.Provider>;

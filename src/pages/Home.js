@@ -120,8 +120,8 @@ export default function Home() {
     }
   }
 
-  function handleCreateTrip() {
-    const id = createTrip(newTripName);
+  async function handleCreateTrip() {
+    const id = await createTrip(newTripName);
     if (!id) return;
     setSelectedTripId(id);
     setNewTripName("");
