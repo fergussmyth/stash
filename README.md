@@ -1,70 +1,48 @@
-# Getting Started with Create React App
+# TripTok
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+TripTok is a lightweight web app for turning messy TikTok (or social) comments into an Airbnb shortlist you can organize, compare, and share.
 
-## Available Scripts
+## What it does
+Paste a comment full of links, extract Airbnb listings, and save them into trips. Each trip becomes a clean, structured shortlist with titles, notes, and quick actions.
 
-In the project directory, you can run:
+## Why it exists
+When planning trips from TikTok, links are scattered across comments, screenshots, and DMs. TripTok makes it easy to collect those listings, keep context, and compare options without losing track.
 
-### `npm start`
+## Main features
+- Extract Airbnb links from pasted comments (including short/slink URLs).
+- Save links to trips with titles, notes, and metadata chips.
+- Bulk selection, auto-open control, and duplicate detection.
+- Compare up to 4 listings side-by-side.
+- Share read-only trip links with friends.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Run locally
+From the project root:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+# Install frontend deps
+npm install
 
-### `npm test`
+# Install server deps
+cd server
+npm install
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+# Start server (API on http://localhost:5000)
+npm start
+```
 
-### `npm run build`
+In another terminal:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```bash
+# Start frontend (http://localhost:3000)
+cd ..
+npm start
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Short roadmap
+- Better parsing of TikTok comments and other short-link formats.
+- Import/export trips for backup.
+- Rich compare view (price, location, rating details).
+- Optional trip sharing with expiration.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+---
+Built for fast, real-world trip planning from social discovery.
