@@ -20,6 +20,30 @@ function titleCase(input = "") {
     .join(" ");
 }
 
+function splitTitleParts(title, fallbackUrl) {
+  const base = (title || "").trim() || fallbackTitleForUrl(fallbackUrl);
+  const parts = base.split(/\s*[•·]\s*/);
+  if (parts.length <= 1) {
+    return { main: base, meta: [] };
+  }
+  return { main: parts[0], meta: parts.slice(1) };
+}
+
+function splitMetaParts(parts = []) {
+  let rating = "";
+  const chips = [];
+  for (const part of parts) {
+    const trimmed = (part || "").trim();
+    if (!trimmed) continue;
+    if (!rating && /^[⭐★]\s*\d/.test(trimmed)) {
+      rating = trimmed.replace(/^[⭐★]\s*/, "");
+      continue;
+    }
+    chips.push(trimmed);
+  }
+  return { rating, chips };
+}
+
 export default function ShareTrip() {
   const { shareId } = useParams();
   const [trip, setTrip] = useState(null);
@@ -128,6 +152,7 @@ export default function ShareTrip() {
         )}
 
         <div className="content">
+          {loadError && <p className="warning">{loadError}</p>}
           {!loading && trip && <div className="readOnlyBadge">Read-only</div>}
           {loading ? (
             <p className="muted">Loading shared trip...</p>
@@ -138,32 +163,37 @@ export default function ShareTrip() {
               {items.map((item) => (
                 <div key={item.id} className="itemCard">
                   <div className="itemTop">
-                    <a
-                      className="itemLink"
-                      href={item.airbnbUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {(item.title || "").trim() || fallbackTitleForUrl(item.airbnbUrl)}
-                    </a>
+                    {(() => {
+                      const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+                      const { rating, chips } = splitMetaParts(titleParts.meta);
+                      return (
+                        <div className="itemTitleBlock">
+                          <a
+                            className="itemTitleLink"
+                            href={item.airbnbUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {titleParts.main}
+                          </a>
+                          {(rating || chips.length > 0) && (
+                            <div className="itemMetaRow">
+                              {rating && <span className="ratingPill">⭐ {rating}</span>}
+                              {chips.length > 0 && (
+                                <div className="metaChips">
+                                  {chips.map((part) => (
+                                    <span key={part} className="metaChip">
+                                      {part}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
-                    <div className="itemActions">
-                      <a
-                        className="miniBtn linkBtn"
-                        href={item.airbnbUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open
-                      </a>
-                      <button
-                        className="miniBtn"
-                        type="button"
-                        onClick={() => navigator.clipboard.writeText(item.airbnbUrl)}
-                      >
-                        Copy
-                      </button>
-                    </div>
                   </div>
                 </div>
               ))}

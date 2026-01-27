@@ -62,7 +62,8 @@ export default function Profile() {
   }
 
   async function handleCopyShare(trip) {
-    const shareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+    const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+    const shareBase = rawShareBase.replace(/\/+$/, "");
     const shareUrl = `${shareBase}/share/${trip.share_id}`;
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(shareUrl);

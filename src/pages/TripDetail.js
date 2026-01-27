@@ -34,6 +34,21 @@ function splitTitleParts(title, fallbackUrl) {
   return { main: parts[0], meta: parts.slice(1) };
 }
 
+function splitMetaParts(parts = []) {
+  let rating = "";
+  const chips = [];
+  for (const part of parts) {
+    const trimmed = (part || "").trim();
+    if (!trimmed) continue;
+    if (!rating && /^[⭐★]\s*\d/.test(trimmed)) {
+      rating = trimmed.replace(/^[⭐★]\s*/, "");
+      continue;
+    }
+    chips.push(trimmed);
+  }
+  return { rating, chips };
+}
+
 function formatSharedBy(displayName) {
   if (displayName) return displayName;
   return "a TripTok user";
@@ -68,7 +83,8 @@ export default function TripDetail() {
 
   const trip = tripsById.get(id);
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
-  const shareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+  const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+  const shareBase = rawShareBase.replace(/\/+$/, "");
   const shareUrlFromBase = trip?.shareId ? `${shareBase}/share/${trip.shareId}` : "";
   const shareUrlFinal = shareUrlOverride || shareUrlFromBase || shareUrl;
 
@@ -252,7 +268,7 @@ export default function TripDetail() {
         });
         return;
       } catch {
-        // fall back to panel if share was cancelled or failed
+        return;
       }
     }
     setShareOpen((v) => !v);
@@ -272,7 +288,19 @@ export default function TripDetail() {
     }
   }
 
-  function openItemShare(item) {
+  async function openItemShare(item) {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: item.title || "Airbnb listing",
+          url: item.airbnbUrl,
+        });
+        setItemMenuOpenId("");
+        return;
+      } catch {
+        // fall back to modal
+      }
+    }
     setItemShare(item);
     setItemShareMsg("");
     setItemMenuOpenId("");
@@ -284,19 +312,6 @@ export default function TripDetail() {
       await navigator.clipboard.writeText(itemShare.airbnbUrl);
       setItemShareMsg("Copied!");
       setTimeout(() => setItemShareMsg(""), 1500);
-    }
-  }
-
-  async function handleSystemShareItem() {
-    if (!itemShare || !navigator.share) return;
-    try {
-      await navigator.share({
-        title: itemShare.title || "Airbnb listing",
-        url: itemShare.airbnbUrl,
-      });
-      setItemShare(null);
-    } catch {
-      // keep modal open if cancelled
     }
   }
 
@@ -379,7 +394,7 @@ export default function TripDetail() {
             </button>
           )}
         </div>
-        {(trip.shareId || trip.isShared) && (
+        {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
           <div className="sharedByLine">
             Shared by {formatSharedBy(trip.ownerDisplayName)}
           </div>
@@ -442,11 +457,6 @@ export default function TripDetail() {
                     </button>
                     <div className="shareLinkValue">{shareUrlFinal}</div>
                   </div>
-                  {navigator.share && (
-                    <button className="secondary-btn" type="button" onClick={handleSystemShare}>
-                      Share via device
-                    </button>
-                  )}
                   <a
                     className="secondary-btn linkBtn"
                     href={`https://wa.me/?text=${encodeURIComponent(
@@ -515,11 +525,6 @@ export default function TripDetail() {
                     </button>
                     <div className="shareLinkValue">{itemShare.airbnbUrl}</div>
                   </div>
-                  {navigator.share && (
-                    <button className="secondary-btn" type="button" onClick={handleSystemShareItem}>
-                      Share via device
-                    </button>
-                  )}
                   <a
                     className="secondary-btn linkBtn"
                     href={`https://wa.me/?text=${encodeURIComponent(itemShare.airbnbUrl)}`}
@@ -588,14 +593,6 @@ export default function TripDetail() {
                           </div>
 
                           <div className="compareActionsRow">
-                            <a
-                              className="miniBtn linkBtn compareBtn"
-                              href={item.airbnbUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open
-                            </a>
                             <div className="itemMenuWrap">
                               <button
                                 className="itemMenuBtn"
@@ -659,6 +656,7 @@ export default function TripDetail() {
 
                   {sortedItems.map((item) => {
                     const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+                    const { rating, chips } = splitMetaParts(titleParts.meta);
                     const isSelected = compareSelected.has(item.id);
                     const disableSelect = compareSelected.size >= 4 && !isSelected;
 
@@ -675,96 +673,96 @@ export default function TripDetail() {
                               />
                             </label>
                           )}
-                          <div className="itemTitleBlock">
-                            {editingId === item.id ? (
-                              <input
-                                className="titleInput"
-                                value={editingTitle}
-                                onChange={(e) => setEditingTitle(e.target.value)}
-                              />
-                            ) : (
-                              <>
-                                <a
-                                  className="itemLink"
-                                  href={item.airbnbUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {titleParts.main}
-                                </a>
-                                {titleParts.meta.length > 0 && (
-                                  <div className="itemMeta">
-                                    {titleParts.meta.map((part) => (
-                                      <span key={part} className="metaBadge">
-                                        {part}
-                                      </span>
-                                    ))}
+                          <div className="itemHeaderRow">
+                            <div className="itemTitleBlock">
+                              {editingId === item.id ? (
+                                <input
+                                  className="titleInput"
+                                  value={editingTitle}
+                                  onChange={(e) => setEditingTitle(e.target.value)}
+                                />
+                              ) : (
+                                <>
+                                  <div className="itemTitleRow">
+                                    <a
+                                      className="itemTitleLink"
+                                      href={item.airbnbUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      {titleParts.main}
+                                    </a>
+                                    {rating && <span className="ratingPill">⭐ {rating}</span>}
                                   </div>
-                                )}
-                              </>
-                            )}
-                          </div>
+                                  {chips.length > 0 && (
+                                    <div className="itemMetaRow">
+                                      <div className="metaChips">
+                                        {chips.map((part) => (
+                                          <span key={part} className="metaChip">
+                                            {part}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
 
-                          <div className="itemActions">
-                            <a
-                              className="miniBtn linkBtn"
-                              href={item.airbnbUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open
-                            </a>
-                            {editingId === item.id ? (
-                              <>
-                                <button
-                                  className="miniBtn"
-                                  type="button"
-                                  onClick={() => saveEditTitle(item)}
-                                >
-                                  Save
-                                </button>
-                                <button className="miniBtn" type="button" onClick={cancelEditTitle}>
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                className="miniBtn"
-                                type="button"
-                                onClick={() => startEditTitle(item)}
-                              >
-                                Edit
-                              </button>
-                            )}
-                            <div className="itemMenuWrap">
-                              <button
-                                className="itemMenuBtn"
-                                type="button"
-                                aria-label="Listing options"
-                                onClick={() =>
-                                  setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
-                                }
-                              >
-                                ⋯
-                              </button>
-                              {itemMenuOpenId === item.id && (
-                                <div className="itemMenu" role="menu">
+                            <div className="itemActions itemActionsTop">
+                              {editingId === item.id ? (
+                                <div className="itemSecondaryActions">
                                   <button
-                                  className="itemMenuItem"
-                                  type="button"
-                                  onClick={() => openItemShare(item)}
-                                >
-                                  Share
-                                </button>
-                                  <button
-                                    className="itemMenuItem danger"
+                                    className="miniBtn"
                                     type="button"
-                                    onClick={() => handleRemoveItem(item.id)}
+                                    onClick={() => saveEditTitle(item)}
                                   >
-                                    Remove
+                                    Save
+                                  </button>
+                                  <button className="miniBtn" type="button" onClick={cancelEditTitle}>
+                                    Cancel
                                   </button>
                                 </div>
-                              )}
+                              ) : null}
+                              <div className="itemMenuWrap">
+                                <button
+                                  className="itemMenuBtn"
+                                  type="button"
+                                  aria-label="Listing options"
+                                  onClick={() =>
+                                    setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
+                                  }
+                                >
+                                  ⋯
+                                </button>
+                                {itemMenuOpenId === item.id && (
+                                  <div className="itemMenu" role="menu">
+                                    {editingId !== item.id && (
+                                      <button
+                                        className="itemMenuItem"
+                                        type="button"
+                                        onClick={() => startEditTitle(item)}
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
+                                    <button
+                                      className="itemMenuItem"
+                                      type="button"
+                                      onClick={() => openItemShare(item)}
+                                    >
+                                      Share
+                                    </button>
+                                    <button
+                                      className="itemMenuItem danger"
+                                      type="button"
+                                      onClick={() => handleRemoveItem(item.id)}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>

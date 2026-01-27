@@ -52,10 +52,19 @@ export default function Trips() {
   } = useTrips();
   const navigate = useNavigate();
   const [menuOpenId, setMenuOpenId] = useState("");
-  const [pinnedIds, setPinnedIds] = useState(new Set());
+  const [pinnedIds, setPinnedIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem("pinned_trip_ids_v1");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [shareTrip, setShareTrip] = useState(null);
   const [shareMsg, setShareMsg] = useState("");
-  const shareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+  const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+  const shareBase = rawShareBase.replace(/\/+$/, "");
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -67,6 +76,11 @@ export default function Trips() {
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
   }, []);
+
+  useEffect(() => {
+    const ids = Array.from(pinnedIds);
+    localStorage.setItem("pinned_trip_ids_v1", JSON.stringify(ids));
+  }, [pinnedIds]);
 
   function togglePin(tripId) {
     setPinnedIds((prev) => {
@@ -87,6 +101,17 @@ export default function Trips() {
     if (!shareId) {
       const newShareId = await enableShare(trip.id);
       if (newShareId) shareId = newShareId;
+    }
+    const shareUrl = shareId ? `${shareBase}/share/${shareId}` : "";
+    if (shareUrl && navigator.share) {
+      try {
+        await navigator.share({ title: trip.name, url: shareUrl });
+        setMenuOpenId("");
+        return;
+      } catch {
+        setMenuOpenId("");
+        return;
+      }
     }
     setShareTrip({ ...trip, shareId });
     setMenuOpenId("");
@@ -156,7 +181,15 @@ export default function Trips() {
                 <div className="tripEmptyText">Create one to start saving your favorite stays.</div>
               </div>
             ) : (
-              trips.map((t) => (
+              trips
+                .slice()
+                .sort((a, b) => {
+                  const aPinned = pinnedIds.has(a.id);
+                  const bPinned = pinnedIds.has(b.id);
+                  if (aPinned !== bPinned) return aPinned ? -1 : 1;
+                  return 0;
+                })
+                .map((t) => (
                 <div
                   key={t.id}
                   className={`tripCard ${pinnedIds.has(t.id) ? "pinned" : ""}`}
@@ -244,7 +277,7 @@ export default function Trips() {
                   )}
 
                 </div>
-              ))
+                ))
             )}
           </div>
 
@@ -289,11 +322,6 @@ export default function Trips() {
                     : "Share link unavailable"}
                 </div>
               </div>
-              {navigator.share && (
-                <button className="secondary-btn" type="button" onClick={handleSystemShare}>
-                  Share via device
-                </button>
-              )}
               <a
                 className="secondary-btn linkBtn"
                 href={`https://wa.me/?text=${encodeURIComponent(
