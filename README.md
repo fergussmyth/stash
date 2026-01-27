@@ -38,6 +38,16 @@ cd ..
 npm start
 ```
 
+## Environment variables
+Create a `.env.local` file in the project root:
+
+```
+REACT_APP_SUPABASE_URL=your_supabase_url
+REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Optional: public URL used in shared links (e.g. ngrok/domain)
+REACT_APP_SHARE_ORIGIN=https://your-public-domain.com
+```
+
 ## Short roadmap
 - Better parsing of TikTok comments and other short-link formats.
 - Import/export trips for backup.
