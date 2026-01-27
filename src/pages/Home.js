@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
+import { LoginForm } from "./Login";
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -42,7 +43,7 @@ async function resolveAirbnbUrl(url) {
   if (/\/rooms\/\d+/i.test(url)) return url;
 
   try {
-    const res = await fetch("http://localhost:5000/resolve-airbnb", {
+    const res = await fetch("/resolve-airbnb", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
@@ -62,7 +63,7 @@ function fallbackTitleForUrl(cleanedUrl) {
 }
 
 export default function Home() {
-  const { trips, createTrip, addItemToTrip } = useTrips();
+  const { trips, createTrip, addItemToTrip, user } = useTrips();
 
   const [comment, setComment] = useState("");
   const [link, setLink] = useState("");
@@ -76,6 +77,37 @@ export default function Home() {
   const [selectedTripId, setSelectedTripId] = useState("");
   const [newTripName, setNewTripName] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const pendingCreateRef = useRef(false);
+
+  const pendingTripKey = "pending_trip_create_name";
+
+  useEffect(() => {
+    if (!user || pendingCreateRef.current) return;
+    const pendingName = sessionStorage.getItem(pendingTripKey);
+    if (!pendingName) return;
+
+    let cancelled = false;
+    pendingCreateRef.current = true;
+    (async () => {
+      const id = await createTrip(pendingName);
+      if (!id || cancelled) {
+        pendingCreateRef.current = false;
+        return;
+      }
+      setSelectedTripId(id);
+      setNewTripName("");
+      setSavedMsg("Trip created.");
+      setTimeout(() => setSavedMsg(""), 1200);
+      setShowAuthPrompt(false);
+      sessionStorage.removeItem(pendingTripKey);
+      pendingCreateRef.current = false;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, createTrip]);
 
   // Bulk extraction state
   const [bulkLinks, setBulkLinks] = useState([]); // [{ id, cleaned, original, valid }]
@@ -121,6 +153,16 @@ export default function Home() {
   }
 
   async function handleCreateTrip() {
+    const trimmed = (newTripName || "").trim();
+    if (!trimmed) {
+      setError("Enter a trip name.");
+      return;
+    }
+    if (!user) {
+      sessionStorage.setItem(pendingTripKey, trimmed);
+      setShowAuthPrompt(true);
+      return;
+    }
     const id = await createTrip(newTripName);
     if (!id) return;
     setSelectedTripId(id);
@@ -173,7 +215,7 @@ export default function Home() {
 
     const fetchTitleForUrl = async (cleanedUrl) => {
       try {
-        const res = await fetch("http://localhost:5000/fetch-airbnb-title", {
+        const res = await fetch("/fetch-airbnb-title", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: cleanedUrl }),
@@ -209,7 +251,7 @@ export default function Home() {
   // but bulk mode will NOT verify each link.
   async function verifyAndMaybeRedirectSingle(cleaned) {
     try {
-      const res = await fetch("http://localhost:5000/check-airbnb", {
+      const res = await fetch("/check-airbnb", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: cleaned }),
@@ -391,7 +433,7 @@ export default function Home() {
                   }
                   let title = fallbackTitleForUrl(link);
                   try {
-                    const res = await fetch("http://localhost:5000/fetch-airbnb-title", {
+                    const res = await fetch("/fetch-airbnb-title", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ url: cleanAirbnbUrl(link) }),
@@ -528,6 +570,28 @@ export default function Home() {
           {warning && !error && <p className="warning">{warning}</p>}
         </div>
       </div>
+      {showAuthPrompt && !user && (
+        <div
+          className="authOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowAuthPrompt(false)}
+        >
+          <div className="authModal" onClick={(e) => e.stopPropagation()}>
+            <div className="authModalHeader">
+              <div className="authModalTitle">Sign in to create a trip</div>
+              <button
+                className="miniBtn"
+                type="button"
+                onClick={() => setShowAuthPrompt(false)}
+              >
+                Close
+              </button>
+            </div>
+            <LoginForm />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

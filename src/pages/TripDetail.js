@@ -2,6 +2,8 @@ import { Link, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
 import shareIcon from "../assets/icons/share.png";
+import whatsappIcon from "../assets/icons/whatsapp.png";
+import { LoginForm } from "./Login";
 
 function cleanAirbnbUrl(url) {
   try {
@@ -32,6 +34,11 @@ function splitTitleParts(title, fallbackUrl) {
   return { main: parts[0], meta: parts.slice(1) };
 }
 
+function formatSharedBy(displayName) {
+  if (displayName) return displayName;
+  return "a TripTok user";
+}
+
 export default function TripDetail() {
   const { id } = useParams();
   const {
@@ -40,7 +47,6 @@ export default function TripDetail() {
     updateItemNote,
     updateItemTitle,
     enableShare,
-    disableShare,
     user,
     loading,
   } = useTrips();
@@ -56,16 +62,32 @@ export default function TripDetail() {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMsg, setShareMsg] = useState("");
   const [shareUrlOverride, setShareUrlOverride] = useState("");
+  const [itemMenuOpenId, setItemMenuOpenId] = useState("");
+  const [itemShare, setItemShare] = useState(null);
+  const [itemShareMsg, setItemShareMsg] = useState("");
 
   const trip = tripsById.get(id);
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
-  const shareUrlFinal = shareUrlOverride || shareUrl;
+  const shareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+  const shareUrlFromBase = trip?.shareId ? `${shareBase}/share/${trip.shareId}` : "";
+  const shareUrlFinal = shareUrlOverride || shareUrlFromBase || shareUrl;
 
   useEffect(() => {
     if (trip?.shareId && shareUrlOverride) {
       setShareUrlOverride("");
     }
   }, [trip?.shareId, shareUrlOverride]);
+
+  useEffect(() => {
+    function handleDocumentClick(event) {
+      const target = event.target;
+      if (target && target.closest(".itemMenuWrap")) return;
+      setItemMenuOpenId("");
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, []);
   const sortedItems = useMemo(() => {
     if (!trip?.items) return [];
     const items = [...trip.items];
@@ -217,7 +239,7 @@ export default function TripDetail() {
     if (!trip?.shareId) {
       const newShareId = await enableShare(trip.id);
       if (newShareId) {
-        setShareUrlOverride(`${window.location.origin}/share/${newShareId}`);
+        setShareUrlOverride(`${shareBase}/share/${newShareId}`);
       }
     }
     const targetUrl = shareUrlOverride || shareUrl;
@@ -244,9 +266,52 @@ export default function TripDetail() {
 
   async function handleCopyShareLink() {
     if (!shareUrlFinal) return;
-    await navigator.clipboard.writeText(shareUrlFinal);
-    setShareMessage("Copied!");
-    setShareOpen(false);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrlFinal);
+      setShareMessage("Copied!");
+    }
+  }
+
+  function openItemShare(item) {
+    setItemShare(item);
+    setItemShareMsg("");
+    setItemMenuOpenId("");
+  }
+
+  async function handleCopyItemShare() {
+    if (!itemShare) return;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(itemShare.airbnbUrl);
+      setItemShareMsg("Copied!");
+      setTimeout(() => setItemShareMsg(""), 1500);
+    }
+  }
+
+  async function handleSystemShareItem() {
+    if (!itemShare || !navigator.share) return;
+    try {
+      await navigator.share({
+        title: itemShare.title || "Airbnb listing",
+        url: itemShare.airbnbUrl,
+      });
+      setItemShare(null);
+    } catch {
+      // keep modal open if cancelled
+    }
+  }
+
+  async function handleSystemShare() {
+    if (!shareUrlFinal || !navigator.share) return;
+    try {
+      await navigator.share({
+        title: trip?.name,
+        text: `${trip?.name || "Trip"} shortlist`,
+        url: shareUrlFinal,
+      });
+      setShareOpen(false);
+    } catch {
+      // keep modal open if cancelled
+    }
   }
 
 
@@ -260,6 +325,7 @@ export default function TripDetail() {
 
           <div className="content">
             <p className="muted">Sign in to view and edit your trips.</p>
+            <LoginForm />
             <div className="navRow">
               <Link className="miniBtn linkBtn" to="/login">
                 Sign in
@@ -313,6 +379,11 @@ export default function TripDetail() {
             </button>
           )}
         </div>
+        {(trip.shareId || trip.isShared) && (
+          <div className="sharedByLine">
+            Shared by {formatSharedBy(trip.ownerDisplayName)}
+          </div>
+        )}
 
         <div className="content">
           <div className="navRow">
@@ -342,43 +413,52 @@ export default function TripDetail() {
           </div>
 
           {shareOpen && (trip.shareId || shareUrlOverride) && (
-            <div className="sharePanel">
-              <div className="sharePanelRow">
-                <div className="shareLabel">Share</div>
-                {shareMsg && <div className="shareMsg">{shareMsg}</div>}
-              </div>
-              <div className="shareUrl">{shareUrlFinal}</div>
-              <div className="shareActions">
-                <button className="miniBtn" type="button" onClick={handleCopyShareLink}>
-                  Copy link
-                </button>
-                <a
-                  className="miniBtn linkBtn"
-                  href={`https://wa.me/?text=${encodeURIComponent(shareUrlFinal)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  WhatsApp
-                </a>
-                <a
-                  className="miniBtn linkBtn"
-                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrlFinal)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  X
-                </a>
-                <button
-                  className="miniBtn danger"
-                  type="button"
-                  onClick={() => {
-                    disableShare(trip.id);
-                    setShareUrlOverride("");
-                    setShareOpen(false);
-                  }}
-                >
-                  Disable
-                </button>
+            <div
+              className="shareOverlay"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setShareOpen(false)}
+            >
+              <div className="shareModal" onClick={(e) => e.stopPropagation()}>
+                <div className="shareModalHeader">
+                  <div>
+                    <div className="shareModalTitle">Share trip</div>
+                    <div className="shareModalSubtitle">{trip.name}</div>
+                  </div>
+                  <button
+                    className="shareModalClose"
+                    type="button"
+                    aria-label="Close"
+                    onClick={() => setShareOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+                {shareMsg && <div className="shareModalMsg">{shareMsg}</div>}
+                <div className="shareModalActions">
+                  <div className="shareLinkRow">
+                    <button className="miniBtn blue" type="button" onClick={handleCopyShareLink}>
+                      Copy
+                    </button>
+                    <div className="shareLinkValue">{shareUrlFinal}</div>
+                  </div>
+                  {navigator.share && (
+                    <button className="secondary-btn" type="button" onClick={handleSystemShare}>
+                      Share via device
+                    </button>
+                  )}
+                  <a
+                    className="secondary-btn linkBtn"
+                    href={`https://wa.me/?text=${encodeURIComponent(
+                      `${shareUrlFinal}`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
+                    WhatsApp
+                  </a>
+                </div>
               </div>
             </div>
           )}
@@ -399,6 +479,57 @@ export default function TripDetail() {
                 <button className="miniBtn" type="button" onClick={handleDownloadCsv}>
                   Download CSV
                 </button>
+              </div>
+            </div>
+          )}
+
+          {itemShare && (
+            <div
+              className="shareOverlay"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setItemShare(null)}
+            >
+              <div className="shareModal" onClick={(e) => e.stopPropagation()}>
+                <div className="shareModalHeader">
+                  <div>
+                    <div className="shareModalTitle">Share listing</div>
+                    <div className="shareModalSubtitle">
+                      {(itemShare.title || "").trim() || "Airbnb listing"}
+                    </div>
+                  </div>
+                  <button
+                    className="shareModalClose"
+                    type="button"
+                    aria-label="Close"
+                    onClick={() => setItemShare(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                {itemShareMsg && <div className="shareModalMsg">{itemShareMsg}</div>}
+                <div className="shareModalActions">
+                  <div className="shareLinkRow">
+                    <button className="miniBtn blue" type="button" onClick={handleCopyItemShare}>
+                      Copy
+                    </button>
+                    <div className="shareLinkValue">{itemShare.airbnbUrl}</div>
+                  </div>
+                  {navigator.share && (
+                    <button className="secondary-btn" type="button" onClick={handleSystemShareItem}>
+                      Share via device
+                    </button>
+                  )}
+                  <a
+                    className="secondary-btn linkBtn"
+                    href={`https://wa.me/?text=${encodeURIComponent(itemShare.airbnbUrl)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
+                    WhatsApp
+                  </a>
+                </div>
               </div>
             </div>
           )}
@@ -465,19 +596,36 @@ export default function TripDetail() {
                             >
                               Open
                             </a>
-                            <button
-                              className="miniBtn compareBtn"
-                              type="button"
-                              onClick={() => navigator.clipboard.writeText(item.airbnbUrl)}
-                            >
-                              Copy
-                            </button>
-                            <button
-                              className="miniBtn danger compareBtn"
-                              onClick={() => handleRemoveItem(item.id)}
-                            >
-                              Remove
-                            </button>
+                            <div className="itemMenuWrap">
+                              <button
+                                className="itemMenuBtn"
+                                type="button"
+                                aria-label="Listing options"
+                                onClick={() =>
+                                  setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
+                                }
+                              >
+                                ⋯
+                              </button>
+                              {itemMenuOpenId === item.id && (
+                                <div className="itemMenu" role="menu">
+                                  <button
+                                  className="itemMenuItem"
+                                  type="button"
+                                  onClick={() => openItemShare(item)}
+                                >
+                                  Share
+                                </button>
+                                  <button
+                                    className="itemMenuItem danger"
+                                    type="button"
+                                    onClick={() => handleRemoveItem(item.id)}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <textarea
@@ -588,19 +736,36 @@ export default function TripDetail() {
                                 Edit
                               </button>
                             )}
-                            <button
-                              className="miniBtn"
-                              type="button"
-                              onClick={() => navigator.clipboard.writeText(item.airbnbUrl)}
-                            >
-                              Copy
-                            </button>
+                            <div className="itemMenuWrap">
                               <button
-                                className="miniBtn danger"
-                                onClick={() => handleRemoveItem(item.id)}
+                                className="itemMenuBtn"
+                                type="button"
+                                aria-label="Listing options"
+                                onClick={() =>
+                                  setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
+                                }
                               >
-                                Remove
+                                ⋯
                               </button>
+                              {itemMenuOpenId === item.id && (
+                                <div className="itemMenu" role="menu">
+                                  <button
+                                  className="itemMenuItem"
+                                  type="button"
+                                  onClick={() => openItemShare(item)}
+                                >
+                                  Share
+                                </button>
+                                  <button
+                                    className="itemMenuItem danger"
+                                    type="button"
+                                    onClick={() => handleRemoveItem(item.id)}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
 

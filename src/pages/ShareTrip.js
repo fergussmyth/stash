@@ -7,19 +7,35 @@ function fallbackTitleForUrl(url) {
   return match ? `Airbnb room ${match[1]}` : "Airbnb room";
 }
 
+function formatSharedBy(displayName) {
+  if (displayName) return displayName;
+  return "a TripTok user";
+}
+
+function titleCase(input = "") {
+  return input
+    .trim()
+    .split(/\s+/)
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1).toLowerCase() : ""))
+    .join(" ");
+}
+
 export default function ShareTrip() {
   const { shareId } = useParams();
   const [trip, setTrip] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ownerDisplayName, setOwnerDisplayName] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let mounted = true;
     async function loadSharedTrip() {
       setLoading(true);
+      setLoadError("");
       const { data: tripData, error } = await supabase
         .from("trips")
-        .select("*")
+        .select("id,name,owner_id,share_id,is_shared")
         .eq("share_id", shareId)
         .eq("is_shared", true)
         .single();
@@ -27,24 +43,39 @@ export default function ShareTrip() {
       if (!mounted) return;
 
       if (error || !tripData) {
+        if (error) {
+          setLoadError(error.message || "Shared trip unavailable.");
+        }
         setTrip(null);
         setItems([]);
         setLoading(false);
         return;
       }
 
-      const { data: itemsData } = await supabase
+      const { data: itemsData, error: itemsError } = await supabase
         .from("trip_items")
         .select("*")
         .eq("trip_id", tripData.id)
         .order("added_at", { ascending: false });
 
       if (!mounted) return;
+      if (itemsError) {
+        setLoadError(itemsError.message || "Shared items unavailable.");
+      }
 
       setTrip({
         id: tripData.id,
         name: tripData.name,
       });
+      if (tripData.owner_id) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", tripData.owner_id)
+          .single();
+        if (!mounted) return;
+        setOwnerDisplayName(profileData?.display_name || "");
+      }
       setItems(
         (itemsData || []).map((item) => ({
           id: item.id,
@@ -72,10 +103,8 @@ export default function ShareTrip() {
 
           <div className="content">
             <p className="muted">That share link doesn’t exist (or was disabled).</p>
+            {loadError && <p className="warning">{loadError}</p>}
             <div className="navRow">
-              <Link className="miniBtn linkBtn" to="/login">
-                Sign in
-              </Link>
               <Link className="miniBtn linkBtn" to="/">
                 Extractor
               </Link>
@@ -92,8 +121,14 @@ export default function ShareTrip() {
         <h1>
           {trip?.name || "Trip"} <span>Shared</span>
         </h1>
+        {!loading && trip && (
+          <div className="sharedByLine">
+            Shared by {titleCase(formatSharedBy(ownerDisplayName))}
+          </div>
+        )}
 
         <div className="content">
+          {!loading && trip && <div className="readOnlyBadge">Read-only</div>}
           {loading ? (
             <p className="muted">Loading shared trip...</p>
           ) : items.length === 0 ? (

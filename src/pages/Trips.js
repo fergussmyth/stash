@@ -1,7 +1,10 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
+import { LoginForm } from "./Login";
+import pinIcon from "../assets/icons/pin (1).png";
+import whatsappIcon from "../assets/icons/whatsapp.png";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 function cleanAirbnbUrl(url) {
   try {
@@ -23,22 +26,110 @@ function fallbackTitleForUrl(url) {
   return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
 }
 
+function formatLastUpdated(trip) {
+  const itemTimes = (trip.items || [])
+    .map((item) => item.addedAt || 0)
+    .filter(Boolean);
+  const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
+  if (!latest) return "recently";
+  return new Date(latest).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function Trips() {
-  const { trips, createTrip, deleteTrip, user, loading, localImportAvailable, importLocalTrips } =
-    useTrips();
+  const {
+    trips,
+    createTrip,
+    deleteTrip,
+    enableShare,
+    user,
+    loading,
+    localImportAvailable,
+    importLocalTrips,
+  } = useTrips();
+  const navigate = useNavigate();
+  const [menuOpenId, setMenuOpenId] = useState("");
+  const [pinnedIds, setPinnedIds] = useState(new Set());
+  const [shareTrip, setShareTrip] = useState(null);
+  const [shareMsg, setShareMsg] = useState("");
+  const shareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
+
+  useEffect(() => {
+    function handleDocumentClick(event) {
+      const target = event.target;
+      if (target && target.closest(".tripMenuWrap")) return;
+      setMenuOpenId("");
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, []);
+
+  function togglePin(tripId) {
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tripId)) {
+        next.delete(tripId);
+      } else {
+        next.add(tripId);
+      }
+      return next;
+    });
+    setMenuOpenId("");
+  }
+
+  async function openShare(trip) {
+    setShareMsg("");
+    let shareId = trip.shareId || trip.share_id || "";
+    if (!shareId) {
+      const newShareId = await enableShare(trip.id);
+      if (newShareId) shareId = newShareId;
+    }
+    setShareTrip({ ...trip, shareId });
+    setMenuOpenId("");
+  }
+
+  async function handleCopyShare() {
+    if (!shareTrip) return;
+    if (!shareTrip.shareId) return;
+    const shareUrl = `${shareBase}/share/${shareTrip.shareId}`;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareMsg("Copied!");
+      setTimeout(() => setShareMsg(""), 1500);
+    }
+  }
+
+  async function handleSystemShare() {
+    if (!shareTrip || !navigator.share) return;
+    if (!shareTrip.shareId) return;
+    const shareUrl = `${shareBase}/share/${shareTrip.shareId}`;
+    try {
+      await navigator.share({ title: shareTrip.name, url: shareUrl });
+      setShareTrip(null);
+    } catch {
+      // keep modal open if cancelled
+    }
+  }
 
   return (
-    <div className="page">
-      <div className="card glow">
+    <div className="page tripsPage">
+      <div className="card glow tripsCard">
         <h1>
           Your <span>Trips</span>
         </h1>
 
         <div className="content">
           {!user && (
-            <div className="muted">
-              Sign in to create and sync trips across devices.
-            </div>
+            <>
+              <div className="muted">
+                Sign in to create and sync trips across devices.
+              </div>
+              <LoginForm />
+            </>
           )}
 
           {user && localImportAvailable && (
@@ -50,35 +141,101 @@ export default function Trips() {
             </div>
           )}
 
-          <div className="tripCreate">
-            <TripCreate createTrip={createTrip} disabled={!user} />
-          </div>
+          {user && (
+            <div className="tripCreate">
+              <TripCreate createTrip={createTrip} />
+            </div>
+          )}
 
           <div className="tripList">
             {loading ? (
               <p className="muted">Loading trips...</p>
-            ) : trips.length === 0 ? (
-              <p className="muted">No trips yet. Create one and start saving links.</p>
+            ) : user && trips.length === 0 ? (
+              <div className="tripEmpty">
+                <div className="tripEmptyTitle">No trips yet</div>
+                <div className="tripEmptyText">Create one to start saving your favorite stays.</div>
+              </div>
             ) : (
               trips.map((t) => (
-                <div key={t.id} className="tripCard">
-                  <div className="tripMeta">
+                <div
+                  key={t.id}
+                  className={`tripCard ${pinnedIds.has(t.id) ? "pinned" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/trips/${t.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigate(`/trips/${t.id}`);
+                    }
+                  }}
+                >
+                  <div className="tripHeader">
                     <div className="tripName">{t.name}</div>
-                    <div className="tripCount">{t.items.length} saved</div>
+                    <div className="tripMetaLine">
+                      {t.items.length} listing{t.items.length === 1 ? "" : "s"} • last updated{" "}
+                      {formatLastUpdated(t)}
+                    </div>
+                    {pinnedIds.has(t.id) && (
+                      <button
+                        className="tripPinBtn"
+                        type="button"
+                        aria-label="Unpin trip"
+                        title="Unpin trip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(t.id);
+                        }}
+                      >
+                        <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
+                      </button>
+                    )}
+                    <div className="tripMenuWrap" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="tripMenuBtn"
+                        type="button"
+                        aria-label="Trip options"
+                        onClick={() => setMenuOpenId((prev) => (prev === t.id ? "" : t.id))}
+                      >
+                        ⋯
+                      </button>
+                      {menuOpenId === t.id && (
+                        <div className="tripMenu" role="menu">
+                          <button
+                            className="tripMenuItem"
+                            type="button"
+                            onClick={() => openShare(t)}
+                          >
+                            Share
+                          </button>
+                          <button
+                            className="tripMenuItem"
+                            type="button"
+                            onClick={() => togglePin(t.id)}
+                          >
+                            {pinnedIds.has(t.id) ? "Unpin" : "Pin"}
+                          </button>
+                          <button
+                            className="tripMenuItem danger"
+                            type="button"
+                            onClick={() => {
+                              setMenuOpenId("");
+                              deleteTrip(t.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {t.items.length > 0 && (
                     <div className="tripItemsPreview">
                       {t.items.slice(0, 3).map((item) => (
-                        <a
-                          key={item.id}
-                          className="tripItemLink"
-                          href={item.airbnbUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
+                        <div key={item.id} className="tripItemPreview">
                           {(item.title || "").trim() || fallbackTitleForUrl(item.airbnbUrl)}
-                        </a>
+                        </div>
                       ))}
                       {t.items.length > 3 && (
                         <span className="tripItemMore">+{t.items.length - 3} more</span>
@@ -86,14 +243,6 @@ export default function Trips() {
                     </div>
                   )}
 
-                  <div className="actions">
-                    <Link className="secondary-btn linkBtn" to={`/trips/${t.id}`}>
-                      Open
-                    </Link>
-                    <button className="secondary-btn" onClick={() => deleteTrip(t.id)}>
-                      Delete
-                    </button>
-                  </div>
                 </div>
               ))
             )}
@@ -106,6 +255,62 @@ export default function Trips() {
           </div>
         </div>
       </div>
+      {shareTrip && (
+        <div
+          className="shareOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShareTrip(null)}
+        >
+          <div className="shareModal" onClick={(e) => e.stopPropagation()}>
+            <div className="shareModalHeader">
+              <div>
+                <div className="shareModalTitle">Share trip</div>
+                <div className="shareModalSubtitle">{shareTrip.name}</div>
+              </div>
+              <button
+                className="shareModalClose"
+                type="button"
+                aria-label="Close"
+                onClick={() => setShareTrip(null)}
+              >
+                ×
+              </button>
+            </div>
+            {shareMsg && <div className="shareModalMsg">{shareMsg}</div>}
+            <div className="shareModalActions">
+              <div className="shareLinkRow">
+                <button className="miniBtn blue" type="button" onClick={handleCopyShare}>
+                  Copy
+                </button>
+                <div className="shareLinkValue">
+                  {shareTrip.shareId
+                    ? `${shareBase}/share/${shareTrip.shareId}`
+                    : "Share link unavailable"}
+                </div>
+              </div>
+              {navigator.share && (
+                <button className="secondary-btn" type="button" onClick={handleSystemShare}>
+                  Share via device
+                </button>
+              )}
+              <a
+                className="secondary-btn linkBtn"
+                href={`https://wa.me/?text=${encodeURIComponent(
+                  shareTrip.shareId
+                    ? `${shareBase}/share/${shareTrip.shareId}`
+                    : ""
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
+                WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

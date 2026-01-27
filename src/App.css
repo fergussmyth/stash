@@ -421,6 +421,7 @@ h1 span {
   margin: 24px auto 12px;
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: 8px;
   z-index: 50;
   pointer-events: auto;
@@ -428,11 +429,15 @@ h1 span {
 }
 
 .topNavLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-decoration: none;
   color: #cbd5f5;
   font-weight: 800;
   font-size: 13px;
   padding: 8px 14px;
+  height: 40px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.9);
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.35),
@@ -441,6 +446,18 @@ h1 span {
 
 .topNavLink:hover {
   background: rgba(30, 41, 59, 0.9);
+}
+
+.topNavLink.iconLink {
+  padding: 8px;
+  width: 40px;
+  height: 40px;
+}
+
+.topNavIcon {
+  width: 18px;
+  height: 18px;
+  filter: brightness(0) invert(1);
 }
 
 .select {
@@ -480,19 +497,33 @@ h1 span {
 
 .tripCard,
 .itemCard {
-  margin-top: 14px;
-  padding: 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  margin-top: 20px;
+  padding: 22px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.75);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.12);
   text-align: left;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+  cursor: pointer;
 }
 
-.tripMeta {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+.tripCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
+.tripsPage .content {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.tripHeader {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  position: relative;
 }
 
 .loginBox {
@@ -628,19 +659,14 @@ h1 span {
 .tripItemsPreview {
   display: grid;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
-.tripItemLink {
-  color: rgba(226, 232, 240, 0.95);
-  text-decoration: none;
-  font-weight: 700;
+.tripItemPreview {
+  color: rgba(148, 163, 184, 0.9);
+  font-weight: 600;
   font-size: 13px;
-  line-height: 1.4;
-}
-
-.tripItemLink:hover {
-  text-decoration: underline;
+  line-height: 1.5;
 }
 
 .tripItemMore {
@@ -651,12 +677,135 @@ h1 span {
 
 .tripName {
   font-weight: 900;
+  font-size: 20px;
+  color: rgba(226, 232, 240, 0.98);
+  letter-spacing: 0.2px;
 }
 
-.tripCount {
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 800;
+.tripMetaLine {
+  color: rgba(148, 163, 184, 0.8);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.tripCard.pinned {
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.55),
+    inset 0 0 0 1px rgba(59, 130, 246, 0.45);
+}
+
+.tripPinBtn {
+  position: absolute;
+  top: 4px;
+  right: 40px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.6);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tripPinBtn:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.tripPinIcon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.6));
+}
+
+.tripMenuBtn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.6);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 20px;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tripMenuBtn:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.tripMenu {
+  position: absolute;
+  top: 36px;
+  right: 6px;
+  min-width: 160px;
+  background: rgba(10, 15, 28, 0.98);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+  display: grid;
+  gap: 6px;
+  z-index: 2;
+}
+
+.tripMenuItem {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.9);
   font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tripMenuItem:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.tripMenuItem.danger {
+  color: #fecaca;
+}
+
+.tripEmpty {
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  text-align: center;
+}
+
+.tripEmptyTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.9);
+  margin-bottom: 6px;
+}
+
+.tripEmptyText {
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.85);
+  font-weight: 600;
+}
+
+.iconBtn.danger {
+  color: #fecaca;
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.35);
+}
+
+.iconBtn.danger:hover {
+  background: rgba(248, 113, 113, 0.18);
 }
 
 .linkBtn {
@@ -825,6 +974,66 @@ h1 span {
   justify-content: flex-end;
 }
 
+.itemMenuWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.itemMenuBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.65);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 18px;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.itemMenuBtn:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.itemMenu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  min-width: 140px;
+  background: rgba(10, 15, 28, 0.98);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+  display: grid;
+  gap: 6px;
+  z-index: 2;
+}
+
+.itemMenuItem {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.itemMenuItem:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.itemMenuItem.danger {
+  color: #fecaca;
+}
+
 .compareCheckbox {
   display: inline-flex;
   align-items: center;
@@ -936,6 +1145,242 @@ h1 span {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
+}
+
+.authOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(2, 6, 23, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  backdrop-filter: blur(6px);
+}
+
+.authModal {
+  width: min(520px, 100%);
+  background: rgba(10, 15, 28, 0.98);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+}
+
+.authModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.authModalTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.shareOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(2, 6, 23, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  backdrop-filter: blur(6px);
+}
+
+.shareModal {
+  width: min(520px, 100%);
+  background: rgba(10, 15, 28, 0.98);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+}
+
+.shareModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.shareModalTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.shareModalSubtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.85);
+  text-align: center;
+}
+
+.sharedByLine {
+  margin-top: -14px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.75);
+  text-align: center;
+}
+
+.readOnlyBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.profileSection {
+  margin-bottom: 18px;
+}
+
+.profileLabel {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(148, 163, 184, 0.75);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.profileValue {
+  font-size: 16px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.profileRow {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 10px;
+  align-items: center;
+}
+
+.profileLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.profileTripList {
+  display: grid;
+  gap: 10px;
+}
+
+.profileTripRow {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profileTripName {
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.profileToast {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shareModalClose {
+  position: absolute;
+  right: 0;
+  top: 0;
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.shareModalClose:hover {
+  color: #f8fafc;
+}
+
+.shareModalMsg {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shareModalActions {
+  display: grid;
+  gap: 10px;
+}
+
+.shareIconSmall {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.shareLinkRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.miniBtn.blue {
+  background: rgba(59, 130, 246, 0.95);
+  color: white;
+}
+
+.miniBtn.blue:hover {
+  background: rgba(37, 99, 235, 0.95);
+}
+
+.shareLinkValue {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compareCount {

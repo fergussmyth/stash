@@ -5,8 +5,9 @@ import TripDetail from "./pages/TripDetail";
 import ShareTrip from "./pages/ShareTrip";
 import { TripsProvider } from "./hooks/useTrips";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
-import { supabase } from "./lib/supabaseClient";
 import Login from "./pages/Login";
+import Profile from "./pages/Profile";
+import userIcon from "./assets/icons/user.png";
 
 function AppShell() {
   const location = useLocation();
@@ -24,9 +25,9 @@ function AppShell() {
             Trips
           </Link>
           {user ? (
-            <button className="topNavLink" type="button" onClick={() => supabase.auth.signOut()}>
-              Sign out
-            </button>
+            <Link className="topNavLink iconLink" to="/profile" aria-label="Profile">
+              <img className="topNavIcon" src={userIcon} alt="" aria-hidden="true" />
+            </Link>
           ) : (
             <Link className="topNavLink" to="/login">
               Sign in
@@ -40,6 +41,7 @@ function AppShell() {
         <Route path="/login" element={<Login />} />
         <Route path="/trips" element={<Trips />} />
         <Route path="/trips/:id" element={<TripDetail />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/share/:shareId" element={<ShareTrip />} />
       </Routes>
     </>

@@ -9,14 +9,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setUser(data?.user ?? null);
+      setUser(data?.session?.user ?? null);
       setLoading(false);
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
       setUser(session?.user ?? null);
+      setLoading(false);
     });
 
     return () => {
@@ -24,6 +26,19 @@ export function AuthProvider({ children }) {
       sub?.subscription?.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("profiles")
+      .upsert({ id: user.id, email: user.email ?? null })
+      .then(({ error }) => {
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to upsert profile:", error.message);
+        }
+      });
+  }, [user]);
 
   const value = useMemo(() => ({ user, loading }), [user, loading]);
 

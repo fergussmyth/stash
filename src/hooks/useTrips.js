@@ -61,18 +61,29 @@ export function TripsProvider({ children }) {
     }
     setLoading(true);
 
-    const { data: tripsData, error: tripsError } = await supabase
+    let { data: tripsData, error: tripsError } = await supabase
       .from("trips")
-      .select("*")
+      .select("*, profiles:owner_id(display_name)")
       .eq("owner_id", user.id)
       .order("created_at", { ascending: false });
 
     if (tripsError) {
       // eslint-disable-next-line no-console
       console.error("Failed to load trips:", tripsError.message);
-      setTrips([]);
-      setLoading(false);
-      return;
+      const retry = await supabase
+        .from("trips")
+        .select("*")
+        .eq("owner_id", user.id)
+        .order("created_at", { ascending: false });
+      if (retry.error) {
+        // eslint-disable-next-line no-console
+        console.error("Retry load trips failed:", retry.error.message);
+        setTrips([]);
+        setLoading(false);
+        return;
+      }
+      tripsData = retry.data;
+      tripsError = null;
     }
 
     const tripIds = tripsData.map((t) => t.id);
@@ -114,6 +125,7 @@ export function TripsProvider({ children }) {
       items: itemsByTrip.get(t.id) || [],
       shareId: t.share_id || "",
       isShared: !!t.is_shared,
+      ownerDisplayName: t.profiles?.display_name || "",
     }));
 
     setTrips(mapped);
