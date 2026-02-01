@@ -1,0 +1,394 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Stash</title>
+    <style>
+      :root {
+        --bg-0: #0a1020;
+        --bg-1: #0b1224;
+        --card: rgba(15, 23, 42, 0.9);
+        --border: rgba(255, 255, 255, 0.08);
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --muted-strong: #cbd5f5;
+        --accent: #3b82f6;
+        --accent-strong: #2563eb;
+        --success: #86efac;
+        --error: #fca5a5;
+        --radius-lg: 16px;
+        --radius-md: 12px;
+        --shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Sora", "Avenir Next", "Trebuchet MS", sans-serif;
+        background: radial-gradient(circle at top, rgba(59, 130, 246, 0.12), transparent 45%),
+          linear-gradient(180deg, var(--bg-0), var(--bg-1));
+        color: var(--text);
+        margin: 0;
+        padding: 16px;
+        width: 380px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .app {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+
+      .page-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .favicon {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        object-fit: cover;
+      }
+
+      .page-title {
+        font-size: 13px;
+        color: var(--muted);
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .title-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .settings-btn {
+        border: none;
+        background: transparent;
+        width: 24px;
+        height: 24px;
+        border-radius: 0;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      .settings-btn img {
+        width: 18px;
+        height: 18px;
+        filter: brightness(0) invert(1);
+      }
+
+      .settings-btn:hover {
+        opacity: 0.85;
+      }
+
+      h1 {
+        font-size: 17px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 6px 0 0;
+      }
+
+      .domain-pill {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--muted-strong);
+        white-space: nowrap;
+      }
+
+      .divider {
+        height: 1px;
+        background: var(--border-subtle);
+        margin: 12px 0;
+      }
+
+      label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted-strong);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        opacity: 0.75;
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      select,
+      textarea,
+      input {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 10px 12px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+
+      select {
+        height: 40px;
+        appearance: none;
+        color-scheme: dark;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23cbd5f5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 8l4 4 4-4'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        background-size: 14px 14px;
+        padding-right: 30px;
+      }
+
+      select option {
+        background-color: #0b1324;
+        color: var(--text);
+      }
+
+      select option:checked {
+        background-color: #1d4ed8;
+      }
+
+      textarea {
+        min-height: 64px;
+        resize: none;
+      }
+
+      select:focus,
+      textarea:focus,
+      input:focus {
+        outline: none;
+        border-color: rgba(59, 130, 246, 0.8);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+      }
+
+      .section {
+        margin-top: 12px;
+      }
+
+      .url-preview {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-subtle);
+      }
+
+      .url-text {
+        flex: 1;
+        font-size: 12px;
+        color: var(--muted);
+        font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+      }
+
+      .icon-btn {
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--muted-strong);
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      .icon-btn:hover {
+        border-color: rgba(59, 130, 246, 0.5);
+        color: #c7d2fe;
+      }
+
+      .icon-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .btn {
+        flex: 1;
+        height: 40px;
+        border-radius: var(--radius-md);
+        border: 1px solid transparent;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+      }
+
+      .btn-primary {
+        background: var(--accent-strong);
+        color: white;
+        box-shadow: 0 10px 20px rgba(37, 99, 235, 0.25);
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px rgba(37, 99, 235, 0.35);
+        filter: brightness(1.05);
+      }
+
+      .btn-primary:active {
+        transform: translateY(1px);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        border-top-color: white;
+        animation: spin 0.8s linear infinite;
+        display: none;
+      }
+
+      .btn.is-loading .spinner {
+        display: inline-block;
+      }
+
+      .btn.is-loading .btn-label {
+        opacity: 0.85;
+      }
+
+      .btn.is-saved {
+        background: #1d4ed8;
+      }
+
+      .status {
+        margin-top: 10px;
+        font-size: 12px;
+        min-height: 16px;
+        color: var(--muted);
+      }
+
+      .status--success {
+        color: var(--success);
+      }
+
+      .status--error {
+        color: var(--error);
+      }
+
+      .status--info {
+        color: #cbd5f5;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="page-row">
+          <img class="favicon" id="favicon" alt="" />
+          <div class="page-title" id="pageTitle">Current page</div>
+        </div>
+        <div class="title-row">
+          <h1>Stash this page</h1>
+          <div class="title-actions">
+            <span class="domain-pill" id="pageDomain"></span>
+            <button class="settings-btn" id="settingsBtn" type="button" aria-label="Open settings">
+              <img src="assets/icons/settings.png" alt="" />
+            </button>
+          </div>
+        </div>
+        <p class="subtitle">Stash this page to one of your stashes.</p>
+      </header>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <label for="collection">Stash</label>
+        <select id="collection"></select>
+      </div>
+
+      <div class="section">
+        <label for="note">Note</label>
+        <textarea id="note" placeholder="Add a quick note (optional) #tags"></textarea>
+      </div>
+
+      <div class="section">
+        <div class="url-preview">
+          <div class="url-text" id="pageInfo"></div>
+          <button class="icon-btn" id="openUrlBtn" type="button" aria-label="Open page">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 5h7v7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M7 13l8-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M5 7v8a1 1 0 0 0 1 1h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="saveBtn" class="btn btn-primary" type="button">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="btn-label">Stash</span>
+        </button>
+      </div>
+
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

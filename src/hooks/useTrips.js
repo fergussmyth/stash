@@ -63,7 +63,7 @@ export function TripsProvider({ children }) {
 
     let { data: tripsData, error: tripsError } = await supabase
       .from("trips")
-      .select("*, profiles:owner_id(display_name)")
+      .select("*")
       .eq("owner_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -109,7 +109,17 @@ export function TripsProvider({ children }) {
       const list = itemsByTrip.get(item.trip_id) || [];
       list.push({
         id: item.id,
+        url: item.url,
         airbnbUrl: item.url,
+        originalUrl: item.original_url,
+        domain: item.domain,
+        platform: item.platform,
+        itemType: item.item_type,
+        imageUrl: item.image_url,
+        faviconUrl: item.favicon_url,
+        metadata: item.metadata || {},
+        pinned: !!item.pinned,
+        archived: !!item.archived,
         title: item.title,
         note: item.note,
         sourceText: item.source_text,
@@ -121,11 +131,15 @@ export function TripsProvider({ children }) {
     const mapped = tripsData.map((t) => ({
       id: t.id,
       name: t.name,
+      type: t.type || "travel",
+      pinned: !!t.pinned,
+      icon: t.icon || null,
+      color: t.color || null,
       createdAt: t.created_at,
       items: itemsByTrip.get(t.id) || [],
       shareId: t.share_id || "",
       isShared: !!t.is_shared,
-      ownerDisplayName: t.profiles?.display_name || "",
+      ownerDisplayName: "",
     }));
 
     setTrips(mapped);
@@ -138,14 +152,15 @@ export function TripsProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, authLoading]);
 
-  async function createTrip(name) {
+  async function createTrip(name, type = "travel") {
     const trimmed = (name || "").trim();
     if (!trimmed || !user) return null;
     const normalized = titleCase(trimmed);
+    const normalizedType = (type || "travel").trim() || "travel";
 
     const { data, error } = await supabase
       .from("trips")
-      .insert({ owner_id: user.id, name: normalized })
+      .insert({ owner_id: user.id, name: normalized, type: normalizedType })
       .select("*")
       .single();
 
@@ -158,6 +173,10 @@ export function TripsProvider({ children }) {
     const trip = {
       id: data.id,
       name: data.name,
+      type: data.type || "travel",
+      pinned: !!data.pinned,
+      icon: data.icon || null,
+      color: data.color || null,
       createdAt: data.created_at,
       items: [],
       shareId: data.share_id || "",
@@ -186,7 +205,7 @@ export function TripsProvider({ children }) {
 
   async function deleteTrip(tripId) {
     if (!user) return;
-    await supabase.from("trip_items").delete().eq("trip_id", tripId).eq("owner_id", user.id);
+    await supabase.from("trip_items").delete().eq("trip_id", tripId);
     const { error } = await supabase.from("trips").delete().eq("id", tripId).eq("owner_id", user.id);
     if (error) {
       // eslint-disable-next-line no-console
@@ -200,14 +219,25 @@ export function TripsProvider({ children }) {
     if (!user) return;
     const existingTrip = tripsById.get(tripId);
     if (!existingTrip) return;
-    const exists = existingTrip.items.some((i) => i.airbnbUrl === item.airbnbUrl);
+    const incomingUrl = item.url || item.airbnbUrl;
+    if (!incomingUrl) return;
+    const exists = existingTrip.items.some((i) => (i.url || i.airbnbUrl) === incomingUrl);
     if (exists) return;
 
     const { data, error } = await supabase
       .from("trip_items")
       .insert({
         trip_id: tripId,
-        url: item.airbnbUrl,
+        url: incomingUrl,
+        original_url: item.originalUrl || null,
+        domain: item.domain || null,
+        platform: item.platform || null,
+        item_type: item.itemType || "link",
+        image_url: item.imageUrl || null,
+        favicon_url: item.faviconUrl || null,
+        metadata: item.metadata || {},
+        pinned: !!item.pinned,
+        archived: !!item.archived,
         title: item.title,
         note: item.note,
         source_text: item.sourceText,
@@ -224,7 +254,17 @@ export function TripsProvider({ children }) {
 
     const mapped = {
       id: data.id,
+      url: data.url,
       airbnbUrl: data.url,
+      originalUrl: data.original_url,
+      domain: data.domain,
+      platform: data.platform,
+      itemType: data.item_type,
+      imageUrl: data.image_url,
+      faviconUrl: data.favicon_url,
+      metadata: data.metadata || {},
+      pinned: !!data.pinned,
+      archived: !!data.archived,
       title: data.title,
       note: data.note,
       sourceText: data.source_text,
@@ -238,11 +278,7 @@ export function TripsProvider({ children }) {
 
   async function removeItem(tripId, itemId) {
     if (!user) return;
-    const { error } = await supabase
-      .from("trip_items")
-      .delete()
-      .eq("id", itemId)
-      .eq("owner_id", user.id);
+    const { error } = await supabase.from("trip_items").delete().eq("id", itemId);
     if (error) {
       // eslint-disable-next-line no-console
       console.error("Failed to remove item:", error.message);
@@ -255,11 +291,7 @@ export function TripsProvider({ children }) {
 
   async function updateItemNote(tripId, itemId, note) {
     if (!user) return;
-    const { error } = await supabase
-      .from("trip_items")
-      .update({ note })
-      .eq("id", itemId)
-      .eq("owner_id", user.id);
+    const { error } = await supabase.from("trip_items").update({ note }).eq("id", itemId);
     if (error) {
       // eslint-disable-next-line no-console
       console.error("Failed to update note:", error.message);
@@ -276,11 +308,7 @@ export function TripsProvider({ children }) {
 
   async function updateItemTitle(tripId, itemId, title) {
     if (!user) return;
-    const { error } = await supabase
-      .from("trip_items")
-      .update({ title })
-      .eq("id", itemId)
-      .eq("owner_id", user.id);
+    const { error } = await supabase.from("trip_items").update({ title }).eq("id", itemId);
     if (error) {
       // eslint-disable-next-line no-console
       console.error("Failed to update title:", error.message);
@@ -331,6 +359,46 @@ export function TripsProvider({ children }) {
     );
   }
 
+  async function toggleTripPinned(tripId, nextPinned) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trips")
+      .update({ pinned: !!nextPinned })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update pin:", error.message);
+      return;
+    }
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, pinned: !!nextPinned } : t))
+    );
+  }
+
+  async function toggleItemPinned(tripId, itemId, nextPinned) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("trip_items")
+      .update({ pinned: !!nextPinned })
+      .eq("id", itemId);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update item pin:", error.message);
+      return;
+    }
+    setTrips((prev) =>
+      prev.map((t) =>
+        t.id === tripId
+          ? {
+              ...t,
+              items: t.items.map((i) => (i.id === itemId ? { ...i, pinned: !!nextPinned } : i)),
+            }
+          : t
+      )
+    );
+  }
+
   async function importLocalTrips() {
     if (!user || localTripsCache.length === 0) return;
 
@@ -339,9 +407,10 @@ export function TripsProvider({ children }) {
         .from("trips")
         .insert({
           owner_id: user.id,
-          name: localTrip.name || "Trip",
+          name: localTrip.name || "Collection",
           is_shared: !!localTrip.shareId,
           share_id: localTrip.shareId || null,
+          type: localTrip.type || "travel",
         })
         .select("*")
         .single();
@@ -354,7 +423,16 @@ export function TripsProvider({ children }) {
 
       const items = (localTrip.items || []).map((item) => ({
         trip_id: tripData.id,
-        url: item.airbnbUrl,
+        url: item.airbnbUrl || item.url,
+        original_url: item.originalUrl || item.airbnbUrl || item.url || null,
+        domain: item.domain || null,
+        platform: item.platform || null,
+        item_type: item.itemType || "link",
+        image_url: item.imageUrl || null,
+        favicon_url: item.faviconUrl || null,
+        metadata: item.metadata || {},
+        pinned: !!item.pinned,
+        archived: !!item.archived,
         title: item.title,
         note: item.note,
         source_text: item.sourceText,
@@ -390,6 +468,8 @@ export function TripsProvider({ children }) {
     updateItemTitle,
     enableShare,
     disableShare,
+    toggleTripPinned,
+    toggleItemPinned,
     localImportAvailable,
     importLocalTrips,
   };

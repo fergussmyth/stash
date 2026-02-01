@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../hooks/useAuth";
+import stashFullLogo from "../assets/icons/stash-full-logo.png";
 
 export function LoginForm({ redirectTo = null }) {
   const navigate = useNavigate();
@@ -63,7 +64,13 @@ export function LoginForm({ redirectTo = null }) {
   }
 
   return (
-    <div className="loginBox">
+    <form
+      className="loginBox"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleEmailAuth();
+      }}
+    >
       <div className="authTabs">
         <button
           className={`miniBtn ${mode === "signin" ? "activeTab" : ""}`}
@@ -95,7 +102,7 @@ export function LoginForm({ redirectTo = null }) {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <button className="primary-btn" type="button" onClick={handleEmailAuth} disabled={sending}>
+      <button className="primary-btn" type="submit" disabled={sending}>
         {sending ? "Working..." : mode === "signup" ? "Create account" : "Sign in"}
       </button>
       <div className="authDivider">or</div>
@@ -109,7 +116,7 @@ export function LoginForm({ redirectTo = null }) {
       </div>
       {status && <div className="successMsg">{status}</div>}
       {error && <p className="error">✕ {error}</p>}
-    </div>
+    </form>
   );
 }
 
@@ -126,12 +133,13 @@ export default function Login() {
   return (
     <div className="page">
       <div className="card glow">
-        <h1>
-          TripTok <span>Login</span>
-        </h1>
+        <div className="logoWrap">
+          <img className="logo logo-full" src={stashFullLogo} alt="Stash" />
+        </div>
+        <h1>Sign in</h1>
 
         <div className="content">
-          <p className="muted">Sign in to save trips and share across devices.</p>
+          <p className="muted">Sign in to stash and share across devices.</p>
 
           <LoginForm redirectTo="/trips" />
 

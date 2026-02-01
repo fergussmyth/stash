@@ -6,6 +6,51 @@ import whatsappIcon from "../assets/icons/whatsapp.png";
 
 import { useEffect, useState } from "react";
 
+function IconExternal(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M14 4h6v6M10 14l10-10M5 9v10h10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconEdit(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M4 20h4l11-11-4-4L4 16v4zM14 5l4 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconTrash(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function cleanAirbnbUrl(url) {
   try {
     const parsed = new URL(url);
@@ -21,9 +66,40 @@ function extractRoomIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
+function decodeHtmlEntities(text = "") {
+  if (!text) return "";
+  if (typeof document === "undefined") return text;
+  const el = document.createElement("textarea");
+  el.innerHTML = text;
+  return el.value;
+}
+
+function humanizeSlugTitle(pathname = "", hostname = "") {
+  const cleanPath = (pathname || "").replace(/\/+$/, "");
+  if (!cleanPath || cleanPath === "/") return hostname.replace(/^www\./, "");
+  const parts = cleanPath.split("/").filter(Boolean);
+  let slug = parts[parts.length - 1] || "";
+  const prdIndex = parts.findIndex((p) => p.toLowerCase() === "prd");
+  if (prdIndex > 0) {
+    slug = parts[prdIndex - 1] || slug;
+  }
+  if (/^\d+$/.test(slug)) return hostname.replace(/^www\./, "");
+  const words = slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return hostname.replace(/^www\./, "");
+  return words.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function fallbackTitleForUrl(url) {
-  const roomId = extractRoomIdFromUrl(url);
-  return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("airbnb.")) {
+      const roomId = extractRoomIdFromUrl(url);
+      return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
+    }
+    return humanizeSlugTitle(parsed.pathname, parsed.hostname);
+  } catch {
+    return "Saved link";
+  }
 }
 
 function formatLastUpdated(trip) {
@@ -45,6 +121,8 @@ export default function Trips() {
     createTrip,
     deleteTrip,
     enableShare,
+    toggleTripPinned,
+    renameTrip,
     user,
     loading,
     localImportAvailable,
@@ -52,17 +130,12 @@ export default function Trips() {
   } = useTrips();
   const navigate = useNavigate();
   const [menuOpenId, setMenuOpenId] = useState("");
-  const [pinnedIds, setPinnedIds] = useState(() => {
-    try {
-      const raw = localStorage.getItem("pinned_trip_ids_v1");
-      const parsed = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return new Set();
-    }
-  });
   const [shareTrip, setShareTrip] = useState(null);
   const [shareMsg, setShareMsg] = useState("");
+  const [sortMode, setSortMode] = useState("updated");
+  const [editingTripId, setEditingTripId] = useState("");
+  const [editingTripName, setEditingTripName] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
   const shareBase = rawShareBase.replace(/\/+$/, "");
 
@@ -78,21 +151,38 @@ export default function Trips() {
   }, []);
 
   useEffect(() => {
-    const ids = Array.from(pinnedIds);
-    localStorage.setItem("pinned_trip_ids_v1", JSON.stringify(ids));
-  }, [pinnedIds]);
-
-  function togglePin(tripId) {
-    setPinnedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(tripId)) {
-        next.delete(tripId);
-      } else {
-        next.add(tripId);
+    function handleOutsideRename(event) {
+      const target = event.target;
+      if (target && target.closest(".tripRenameRow")) return;
+      if (editingTripId) {
+        setEditingTripId("");
+        setEditingTripName("");
       }
-      return next;
-    });
+    }
+
+    document.addEventListener("mousedown", handleOutsideRename);
+    return () => document.removeEventListener("mousedown", handleOutsideRename);
+  }, [editingTripId]);
+
+  function togglePin(trip) {
+    toggleTripPinned(trip.id, !trip.pinned);
     setMenuOpenId("");
+  }
+
+  function getLastUpdatedTime(trip) {
+    const itemTimes = (trip.items || []).map((item) => item.addedAt || 0).filter(Boolean);
+    const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
+    return latest || 0;
+  }
+
+  async function handleRenameTrip(trip) {
+    const trimmed = editingTripName.trim();
+    if (!trimmed) return;
+    await renameTrip(trip.id, trimmed);
+    setEditingTripId("");
+    setEditingTripName("");
+    setToastMsg("Renamed");
+    setTimeout(() => setToastMsg(""), 1500);
   }
 
   async function openShare(trip) {
@@ -144,14 +234,15 @@ export default function Trips() {
     <div className="page tripsPage">
       <div className="card glow tripsCard">
         <h1>
-          Your <span>Trips</span>
+          Your <span>Collections</span>
         </h1>
 
         <div className="content">
+          {toastMsg && <div className="toast">{toastMsg}</div>}
           {!user && (
             <>
               <div className="muted">
-                Sign in to create and sync trips across devices.
+                Sign in to create and sync collections across devices.
               </div>
               <LoginForm />
             </>
@@ -159,9 +250,9 @@ export default function Trips() {
 
           {user && localImportAvailable && (
             <div className="importBox">
-              <div className="importText">Local trips found on this device.</div>
+              <div className="importText">Local collections found on this device.</div>
               <button className="miniBtn" type="button" onClick={importLocalTrips}>
-                Import local trips to cloud
+                Import local collections to cloud
               </button>
             </div>
           )}
@@ -172,52 +263,134 @@ export default function Trips() {
             </div>
           )}
 
+          {user && (
+            <div className="tripHeaderRow">
+              <div className="sortRow inline">
+                <label className="sortLabel" htmlFor="sortTrips">
+                  Sort
+                </label>
+                <select
+                  id="sortTrips"
+                  className="select sortSelect"
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value)}
+                >
+                  <option value="updated">Last updated</option>
+                  <option value="name">Name (A–Z)</option>
+                  <option value="count">Link count</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           <div className="tripList">
             {loading ? (
-              <p className="muted">Loading trips...</p>
+              <div className="tripSkeletonGrid">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="tripSkeleton" />
+                ))}
+              </div>
             ) : user && trips.length === 0 ? (
               <div className="tripEmpty">
-                <div className="tripEmptyTitle">No trips yet</div>
-                <div className="tripEmptyText">Create one to start saving your favorite stays.</div>
+                <div className="tripEmptyTitle">No collections yet</div>
+                <div className="tripEmptyText">Create one to start saving your favorite links.</div>
+                <Link className="miniBtn linkBtn" to="/">
+                  Go to Stash
+                </Link>
               </div>
             ) : (
               trips
                 .slice()
                 .sort((a, b) => {
-                  const aPinned = pinnedIds.has(a.id);
-                  const bPinned = pinnedIds.has(b.id);
+                  const aPinned = !!a.pinned;
+                  const bPinned = !!b.pinned;
                   if (aPinned !== bPinned) return aPinned ? -1 : 1;
-                  return 0;
+                  if (sortMode === "name") {
+                    return (a.name || "").localeCompare(b.name || "");
+                  }
+                  if (sortMode === "count") {
+                    return (b.items?.length || 0) - (a.items?.length || 0);
+                  }
+                  const aTime = getLastUpdatedTime(a);
+                  const bTime = getLastUpdatedTime(b);
+                  return bTime - aTime;
                 })
                 .map((t) => (
                 <div
                   key={t.id}
-                  className={`tripCard ${pinnedIds.has(t.id) ? "pinned" : ""}`}
+                  className={`tripCard ${t.pinned ? "pinned" : ""}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => navigate(`/trips/${t.id}`)}
+                  onClick={() => {
+                    if (editingTripId === t.id) return;
+                    navigate(`/trips/${t.id}`);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
+                      if (editingTripId === t.id) return;
                       navigate(`/trips/${t.id}`);
                     }
                   }}
                 >
                   <div className="tripHeader">
-                    <div className="tripName">{t.name}</div>
+                    {editingTripId === t.id ? (
+                      <div className="tripRenameRow">
+                        <input
+                          className="input tripRenameInput"
+                          value={editingTripName}
+                          onChange={(e) => setEditingTripName(e.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleRenameTrip(t);
+                            }
+                            if (event.key === "Escape") {
+                              setEditingTripId("");
+                              setEditingTripName("");
+                            }
+                          }}
+                        />
+                        <div className="tripRenameActions">
+                          <button
+                            className="miniBtn"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleRenameTrip(t);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="miniBtn"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingTripId("");
+                              setEditingTripName("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="tripName">{t.name}</div>
+                    )}
                     <div className="tripMetaLine">
-                      {t.items.length} listing{t.items.length === 1 ? "" : "s"} • last updated{" "}
+                      {t.items.length} link{t.items.length === 1 ? "" : "s"} • last updated{" "}
                       {formatLastUpdated(t)}
                     </div>
-                    {pinnedIds.has(t.id) && (
+                    {t.pinned && (
                       <button
                         className="tripPinBtn"
                         type="button"
-                        aria-label="Unpin trip"
-                        title="Unpin trip"
+                        aria-label="Unpin collection"
+                        title="Unpin collection"
                         onClick={(e) => {
                           e.stopPropagation();
-                          togglePin(t.id);
+                          togglePin(t);
                         }}
                       >
                         <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
@@ -227,7 +400,7 @@ export default function Trips() {
                       <button
                         className="tripMenuBtn"
                         type="button"
-                        aria-label="Trip options"
+                        aria-label="Collection options"
                         onClick={() => setMenuOpenId((prev) => (prev === t.id ? "" : t.id))}
                       >
                         ⋯
@@ -244,9 +417,9 @@ export default function Trips() {
                           <button
                             className="tripMenuItem"
                             type="button"
-                            onClick={() => togglePin(t.id)}
+                            onClick={() => togglePin(t)}
                           >
-                            {pinnedIds.has(t.id) ? "Unpin" : "Pin"}
+                            {t.pinned ? "Unpin" : "Pin"}
                           </button>
                           <button
                             className="tripMenuItem danger"
@@ -254,6 +427,8 @@ export default function Trips() {
                             onClick={() => {
                               setMenuOpenId("");
                               deleteTrip(t.id);
+                              setToastMsg("Deleted");
+                              setTimeout(() => setToastMsg(""), 1500);
                             }}
                           >
                             Delete
@@ -261,13 +436,54 @@ export default function Trips() {
                         </div>
                       )}
                     </div>
+                    <div className="tripQuickActions" role="group" aria-label="Quick actions">
+                      <button
+                        className="iconBtn bare quickActionBtn"
+                        type="button"
+                        aria-label="Open collection"
+                        title="Open"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(`/trips/${t.id}`);
+                        }}
+                      >
+                        <IconExternal className="quickActionIcon" />
+                      </button>
+                      <button
+                        className="iconBtn bare quickActionBtn"
+                        type="button"
+                        aria-label="Rename collection"
+                        title="Rename"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingTripId(t.id);
+                          setEditingTripName(t.name || "");
+                        }}
+                      >
+                        <IconEdit className="quickActionIcon" />
+                      </button>
+                      <button
+                        className="iconBtn bare quickActionBtn danger"
+                        type="button"
+                        aria-label="Delete collection"
+                        title="Delete"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteTrip(t.id);
+                          setToastMsg("Deleted");
+                          setTimeout(() => setToastMsg(""), 1500);
+                        }}
+                      >
+                        <IconTrash className="quickActionIcon" />
+                      </button>
+                    </div>
                   </div>
 
                   {t.items.length > 0 && (
                     <div className="tripItemsPreview">
                       {t.items.slice(0, 3).map((item) => (
                         <div key={item.id} className="tripItemPreview">
-                          {(item.title || "").trim() || fallbackTitleForUrl(item.airbnbUrl)}
+                          {decodeHtmlEntities((item.title || "").trim()) || fallbackTitleForUrl(item.airbnbUrl)}
                         </div>
                       ))}
                       {t.items.length > 3 && (
@@ -283,7 +499,7 @@ export default function Trips() {
 
           <div className="navRow">
             <Link className="miniBtn linkBtn" to="/">
-              ← Back to Extractor
+              ← Back to Stash
             </Link>
           </div>
         </div>
@@ -298,7 +514,7 @@ export default function Trips() {
           <div className="shareModal" onClick={(e) => e.stopPropagation()}>
             <div className="shareModalHeader">
               <div>
-                <div className="shareModalTitle">Share trip</div>
+                <div className="shareModalTitle">Share collection</div>
                 <div className="shareModalSubtitle">{shareTrip.name}</div>
               </div>
               <button
@@ -345,25 +561,45 @@ export default function Trips() {
 
 function TripCreate({ createTrip, disabled }) {
   const [name, setName] = useState("");
+  const [type, setType] = useState("travel");
 
   async function handleCreate() {
-    const id = await createTrip(name);
+    const id = await createTrip(name, type);
     if (!id) return;
     setName("");
+    setType("travel");
   }
 
   return (
-    <div className="createTripRow">
+    <form
+      className="createTripRow"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (disabled) return;
+        handleCreate();
+      }}
+    >
       <input
         className="input"
-        placeholder="New trip name (e.g. Paris weekend)"
+        placeholder="New collection name (e.g. Paris weekend)"
         value={name}
         onChange={(e) => setName(e.target.value)}
         disabled={disabled}
       />
-      <button className="secondary-btn" onClick={handleCreate} disabled={disabled}>
+      <select
+        className="select small"
+        value={type}
+        onChange={(e) => setType(e.target.value)}
+        disabled={disabled}
+        aria-label="Collection type"
+      >
+        <option value="travel">Travel</option>
+        <option value="fashion">Fashion</option>
+        <option value="general">General</option>
+      </select>
+      <button className="secondary-btn" type="submit" disabled={disabled}>
         Create
       </button>
-    </div>
+    </form>
   );
 }

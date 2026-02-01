@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../hooks/useAuth";
 
@@ -11,6 +11,17 @@ export default function Profile() {
   const [status, setStatus] = useState("");
   const [sharedTrips, setSharedTrips] = useState([]);
   const [copyMsg, setCopyMsg] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+
+  function makeShareId(length = 12) {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let out = "";
+    for (let i = 0; i < length; i += 1) {
+      out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  }
 
   useEffect(() => {
     if (loading) return;
@@ -31,7 +42,7 @@ export default function Profile() {
     async function loadSharedTrips() {
       const { data } = await supabase
         .from("trips")
-        .select("id,name,share_id,is_shared")
+        .select("id,name,share_id,is_shared,trip_items(count)")
         .eq("owner_id", user.id)
         .eq("is_shared", true)
         .order("created_at", { ascending: false });
@@ -68,8 +79,47 @@ export default function Profile() {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(shareUrl);
       setCopyMsg("Copied link");
+      setToastMsg("Copied");
       setTimeout(() => setCopyMsg(""), 1500);
+      setTimeout(() => setToastMsg(""), 1500);
     }
+  }
+
+  async function handleRevokeShare(trip) {
+    const { error } = await supabase
+      .from("trips")
+      .update({ is_shared: false, share_id: null })
+      .eq("id", trip.id)
+      .eq("owner_id", user.id);
+    if (error) {
+      setStatus("Could not revoke share.");
+      return;
+    }
+    setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
+    setToastMsg("Share revoked");
+    setTimeout(() => setToastMsg(""), 1500);
+  }
+
+  async function handleRegenerateShare(trip) {
+    const nextShareId = makeShareId(12);
+    const { error } = await supabase
+      .from("trips")
+      .update({ is_shared: true, share_id: nextShareId })
+      .eq("id", trip.id)
+      .eq("owner_id", user.id);
+    if (error) {
+      setStatus("Could not regenerate link.");
+      return;
+    }
+    setSharedTrips((prev) =>
+      prev.map((t) => (t.id === trip.id ? { ...t, share_id: nextShareId, is_shared: true } : t))
+    );
+    setToastMsg("Link regenerated");
+    setTimeout(() => setToastMsg(""), 1500);
+  }
+
+  function handleOpenTrip(trip) {
+    navigate(`/trips/${trip.id}`);
   }
 
   if (loading) {
@@ -94,46 +144,105 @@ export default function Profile() {
       <div className="card glow">
         <h1>Profile</h1>
         <div className="content">
+          {toastMsg && <div className="toast">{toastMsg}</div>}
           <div className="profileSection">
             <div className="profileLabel">Email</div>
-            <div className="profileValue">{user.email}</div>
+            <div className="profileValue mutedValue">{user.email}</div>
           </div>
 
           <div className="profileSection">
             <div className="profileLabel">Display name</div>
-            <div className="profileRow">
+            <form
+              className="profileRow"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleSave();
+              }}
+            >
               <input
-                className="input"
+                className="input displayInput"
                 placeholder="Add a display name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
               />
-              <button className="secondary-btn" type="button" onClick={handleSave} disabled={saving}>
+              <button className="secondary-btn" type="submit" disabled={saving}>
                 {saving ? "Saving..." : "Save"}
               </button>
-            </div>
+            </form>
             {status && <div className="savedMsg">{status}</div>}
           </div>
 
           <div className="profileSection">
+            <div className="profileLabel">Chrome extension</div>
+            <div className="profileRow">
+              <div className="muted">Generate and revoke tokens for the extension.</div>
+              <Link className="secondary-btn" to="/settings/extension">
+                Manage tokens
+              </Link>
+            </div>
+          </div>
+
+          <div className="profileSection">
             <div className="profileLabelRow">
-              <div className="profileLabel">My shared trips</div>
+              <div className="profileLabel">My shared collections</div>
               {copyMsg && <div className="profileToast">{copyMsg}</div>}
             </div>
             {sharedTrips.length === 0 ? (
-              <div className="muted">No shared trips yet.</div>
+              <div className="muted">No shared collections yet.</div>
             ) : (
               <div className="profileTripList">
                 {sharedTrips.map((trip) => (
-                  <div key={trip.id} className="profileTripRow">
-                    <div className="profileTripName">{trip.name}</div>
-                    <button
-                      className="miniBtn blue"
-                      type="button"
-                      onClick={() => handleCopyShare(trip)}
-                    >
-                      Copy share link
-                    </button>
+                  <div
+                    key={trip.id}
+                    className="profileTripRow clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleOpenTrip(trip)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleOpenTrip(trip);
+                      }
+                    }}
+                  >
+                    <div className="profileTripMeta">
+                      <div className="profileTripName">{trip.name}</div>
+                      <div className="profileTripCount">
+                        {(trip.trip_items?.[0]?.count || 0)} links
+                      </div>
+                    </div>
+                    <div className="profileTripActions">
+                      <button
+                        className="miniBtn blue"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleCopyShare(trip);
+                        }}
+                      >
+                        Copy link
+                      </button>
+                      <button
+                        className="miniBtn"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleRegenerateShare(trip);
+                        }}
+                      >
+                        Regenerate
+                      </button>
+                      <button
+                        className="miniBtn danger"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleRevokeShare(trip);
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -141,9 +250,31 @@ export default function Profile() {
           </div>
 
           <div className="profileSection">
-            <button className="secondary-btn" type="button" onClick={() => supabase.auth.signOut()}>
-              Sign out
-            </button>
+            {confirmSignOut ? (
+              <div className="signOutConfirm">
+                <div>Sign out of this device?</div>
+                <div className="signOutActions">
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() => supabase.auth.signOut()}
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    className="miniBtn"
+                    type="button"
+                    onClick={() => setConfirmSignOut(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button className="secondary-btn" type="button" onClick={() => setConfirmSignOut(true)}>
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </div>

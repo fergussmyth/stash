@@ -2,14 +2,56 @@ import { Link, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
+function humanizeSlugTitle(pathname = "", hostname = "") {
+  const cleanPath = (pathname || "").replace(/\/+$/, "");
+  if (!cleanPath || cleanPath === "/") return hostname.replace(/^www\./, "");
+  const parts = cleanPath.split("/").filter(Boolean);
+  let slug = parts[parts.length - 1] || "";
+  const prdIndex = parts.findIndex((p) => p.toLowerCase() === "prd");
+  if (prdIndex > 0) {
+    slug = parts[prdIndex - 1] || slug;
+  }
+  if (/^\d+$/.test(slug)) return hostname.replace(/^www\./, "");
+  const words = slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return hostname.replace(/^www\./, "");
+  return words.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function fallbackTitleForUrl(url) {
-  const match = url?.match(/\/rooms\/(\d+)/i);
-  return match ? `Airbnb room ${match[1]}` : "Airbnb room";
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("airbnb.")) {
+      const match = url?.match(/\/rooms\/(\d+)/i);
+      return match ? `Airbnb room ${match[1]}` : "Airbnb room";
+    }
+    return humanizeSlugTitle(parsed.pathname, parsed.hostname);
+  } catch {
+    return "Saved link";
+  }
+}
+
+function getDomain(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function buildMetadataChips(metadata = {}) {
+  const chips = [];
+  if (metadata.rating != null) chips.push(`⭐ ${metadata.rating}`);
+  if (metadata.beds != null) chips.push(`${metadata.beds} beds`);
+  if (metadata.bedrooms != null) chips.push(`${metadata.bedrooms} bedrooms`);
+  if (metadata.bathrooms != null) chips.push(`${metadata.bathrooms} bathrooms`);
+  if (metadata.guests != null) chips.push(`${metadata.guests} guests`);
+  return chips;
 }
 
 function formatSharedBy(displayName) {
   if (displayName) return displayName;
-  return "a TripTok user";
+  return "a Stash user";
 }
 
 function titleCase(input = "") {
@@ -20,8 +62,16 @@ function titleCase(input = "") {
     .join(" ");
 }
 
+function decodeHtmlEntities(text = "") {
+  if (!text) return "";
+  if (typeof document === "undefined") return text;
+  const el = document.createElement("textarea");
+  el.innerHTML = text;
+  return el.value;
+}
+
 function splitTitleParts(title, fallbackUrl) {
-  const base = (title || "").trim() || fallbackTitleForUrl(fallbackUrl);
+  const base = decodeHtmlEntities((title || "").trim()) || fallbackTitleForUrl(fallbackUrl);
   const parts = base.split(/\s*[•·]\s*/);
   if (parts.length <= 1) {
     return { main: base, meta: [] };
@@ -68,7 +118,7 @@ export default function ShareTrip() {
 
       if (error || !tripData) {
         if (error) {
-          setLoadError(error.message || "Shared trip unavailable.");
+          setLoadError(error.message || "Shared collection unavailable.");
         }
         setTrip(null);
         setItems([]);
@@ -103,7 +153,10 @@ export default function ShareTrip() {
       setItems(
         (itemsData || []).map((item) => ({
           id: item.id,
+          url: item.url,
           airbnbUrl: item.url,
+          domain: item.domain,
+          metadata: item.metadata || {},
           title: item.title,
           note: item.note,
         }))
@@ -130,7 +183,7 @@ export default function ShareTrip() {
             {loadError && <p className="warning">{loadError}</p>}
             <div className="navRow">
               <Link className="miniBtn linkBtn" to="/">
-                Extractor
+                Stash
               </Link>
             </div>
           </div>
@@ -143,7 +196,7 @@ export default function ShareTrip() {
     <div className="page">
       <div className="card glow">
         <h1>
-          {trip?.name || "Trip"} <span>Shared</span>
+          {trip?.name || "Collection"} <span>Shared</span>
         </h1>
         {!loading && trip && (
           <div className="sharedByLine">
@@ -155,9 +208,9 @@ export default function ShareTrip() {
           {loadError && <p className="warning">{loadError}</p>}
           {!loading && trip && <div className="readOnlyBadge">Read-only</div>}
           {loading ? (
-            <p className="muted">Loading shared trip...</p>
+            <p className="muted">Loading shared collection...</p>
           ) : items.length === 0 ? (
-            <p className="muted">No links saved yet.</p>
+            <p className="muted">Nothing here yet — stash something.</p>
           ) : (
             <div className="itemList">
               {items.map((item) => (
@@ -166,6 +219,14 @@ export default function ShareTrip() {
                     {(() => {
                       const titleParts = splitTitleParts(item.title, item.airbnbUrl);
                       const { rating, chips } = splitMetaParts(titleParts.meta);
+                      const metadataChips = buildMetadataChips(item.metadata);
+                      const domainChip = item.domain || getDomain(item.airbnbUrl);
+                      const displayChips =
+                        metadataChips.length > 0
+                          ? metadataChips
+                          : domainChip
+                            ? [domainChip]
+                            : [];
                       return (
                         <div className="itemTitleBlock">
                           <a
@@ -176,12 +237,21 @@ export default function ShareTrip() {
                           >
                             {titleParts.main}
                           </a>
-                          {(rating || chips.length > 0) && (
+                          {(rating || chips.length > 0 || displayChips.length > 0) && (
                             <div className="itemMetaRow">
                               {rating && <span className="ratingPill">⭐ {rating}</span>}
                               {chips.length > 0 && (
                                 <div className="metaChips">
                                   {chips.map((part) => (
+                                    <span key={part} className="metaChip">
+                                      {part}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {displayChips.length > 0 && (
+                                <div className="metaChips">
+                                  {displayChips.map((part) => (
                                     <span key={part} className="metaChip">
                                       {part}
                                     </span>

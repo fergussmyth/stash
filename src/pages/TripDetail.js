@@ -2,8 +2,93 @@ import { Link, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
 import shareIcon from "../assets/icons/share.png";
+import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
 import { LoginForm } from "./Login";
+
+function IconList(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconCompare(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <rect x="3" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="13" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function IconExternal(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M14 4h6v6M10 14l10-10M5 9v10h10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconCopy(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <rect x="9" y="9" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="4" y="4" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function IconTrash(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconNote(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M6 4h8l4 4v12H6zM14 4v4h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 12h8M8 16h6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function cleanAirbnbUrl(url) {
   try {
@@ -20,13 +105,36 @@ function extractRoomIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
+function humanizeSlugTitle(pathname = "", hostname = "") {
+  const cleanPath = (pathname || "").replace(/\/+$/, "");
+  if (!cleanPath || cleanPath === "/") return hostname.replace(/^www\./, "");
+  const parts = cleanPath.split("/").filter(Boolean);
+  let slug = parts[parts.length - 1] || "";
+  const prdIndex = parts.findIndex((p) => p.toLowerCase() === "prd");
+  if (prdIndex > 0) {
+    slug = parts[prdIndex - 1] || slug;
+  }
+  if (/^\d+$/.test(slug)) return hostname.replace(/^www\./, "");
+  const words = slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return hostname.replace(/^www\./, "");
+  return words.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function fallbackTitleForUrl(url) {
-  const roomId = extractRoomIdFromUrl(url);
-  return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("airbnb.")) {
+      const roomId = extractRoomIdFromUrl(url);
+      return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
+    }
+    return humanizeSlugTitle(parsed.pathname, parsed.hostname);
+  } catch {
+    return "Saved link";
+  }
 }
 
 function splitTitleParts(title, fallbackUrl) {
-  const base = (title || "").trim() || fallbackTitleForUrl(fallbackUrl);
+  const base = decodeHtmlEntities((title || "").trim()) || fallbackTitleForUrl(fallbackUrl);
   const parts = base.split(/\s*[•·]\s*/);
   if (parts.length <= 1) {
     return { main: base, meta: [] };
@@ -51,7 +159,100 @@ function splitMetaParts(parts = []) {
 
 function formatSharedBy(displayName) {
   if (displayName) return displayName;
-  return "a TripTok user";
+  return "a Stash user";
+}
+
+function decodeHtmlEntities(text = "") {
+  if (!text) return "";
+  if (typeof document === "undefined") return text;
+  const el = document.createElement("textarea");
+  el.innerHTML = text;
+  return el.value;
+}
+
+function getCollectionLabel(type) {
+  if (type === "fashion") return "Fashion list";
+  if (type === "travel") return "Shortlist";
+  return "Collection";
+}
+
+function getCollectionShareLabel(type) {
+  if (type === "fashion") return "fashion list";
+  if (type === "travel") return "shortlist";
+  return "collection";
+}
+
+function getDomain(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function parseDomainList(value = "") {
+  return value
+    .split(/[,\s]+/)
+    .map((item) => item.trim().replace(/^www\./, ""))
+    .filter(Boolean);
+}
+
+function extractTags(text = "") {
+  const matches = [];
+  const pattern = /#([a-z0-9_-]+)/gi;
+  let match = pattern.exec(text);
+  while (match) {
+    matches.push(match[1].toLowerCase());
+    match = pattern.exec(text);
+  }
+  return Array.from(new Set(matches));
+}
+
+function extractMentions(text = "") {
+  const matches = [];
+  const pattern = /@([a-z0-9_-]+)/gi;
+  let match = pattern.exec(text);
+  while (match) {
+    matches.push(match[1].toLowerCase());
+    match = pattern.exec(text);
+  }
+  return Array.from(new Set(matches));
+}
+
+function getFileTypeFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split(".");
+    if (parts.length <= 1) return "other";
+    const ext = parts[parts.length - 1].toLowerCase();
+    if (ext === "pdf") return "pdf";
+    if (["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"].includes(ext)) return "image";
+    if (["mp4", "mov", "webm", "mkv", "m4v"].includes(ext)) return "video";
+    if (["mp3", "wav", "ogg", "m4a", "flac"].includes(ext)) return "audio";
+    if (
+      ["doc", "docx", "ppt", "pptx", "xls", "xlsx", "key", "pages", "numbers"].includes(ext)
+    ) {
+      return "doc";
+    }
+    return "other";
+  } catch {
+    return "other";
+  }
+}
+
+function buildMetadataChips(metadata = {}) {
+  const chips = [];
+  if (metadata.rating != null) chips.push(`⭐ ${metadata.rating}`);
+  if (metadata.beds != null) chips.push(`${metadata.beds} beds`);
+  if (metadata.bedrooms != null) chips.push(`${metadata.bedrooms} bedrooms`);
+  if (metadata.bathrooms != null) chips.push(`${metadata.bathrooms} bathrooms`);
+  if (metadata.guests != null) chips.push(`${metadata.guests} guests`);
+  return chips;
 }
 
 export default function TripDetail() {
@@ -62,6 +263,7 @@ export default function TripDetail() {
     updateItemNote,
     updateItemTitle,
     enableShare,
+    toggleItemPinned,
     user,
     loading,
   } = useTrips();
@@ -72,16 +274,31 @@ export default function TripDetail() {
   const [compareMode, setCompareMode] = useState(false);
   const [compareSelected, setCompareSelected] = useState(new Set());
   const [compareNotice, setCompareNotice] = useState("");
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportMsg, setExportMsg] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMsg, setShareMsg] = useState("");
   const [shareUrlOverride, setShareUrlOverride] = useState("");
   const [itemMenuOpenId, setItemMenuOpenId] = useState("");
   const [itemShare, setItemShare] = useState(null);
   const [itemShareMsg, setItemShareMsg] = useState("");
+  const [viewMode, setViewMode] = useState("list");
+  const [searchText, setSearchText] = useState("");
+  const [domainInclude, setDomainInclude] = useState("");
+  const [domainExclude, setDomainExclude] = useState("");
+  const [fileType, setFileType] = useState("all");
+  const [tagFilter, setTagFilter] = useState("");
+  const [mentionFilter, setMentionFilter] = useState("");
+  const [groupByDomain, setGroupByDomain] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [expandedNotes, setExpandedNotes] = useState(new Set());
+  const [collapsedDomains, setCollapsedDomains] = useState({});
+  const [inlineError, setInlineError] = useState("");
 
   const trip = tripsById.get(id);
+  const collectionLabel = getCollectionLabel(trip?.type);
+  const collectionShareLabel = getCollectionShareLabel(trip?.type);
+  const hasItems = trip?.items?.length > 0;
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
   const shareBase = rawShareBase.replace(/\/+$/, "");
@@ -95,6 +312,60 @@ export default function TripDetail() {
   }, [trip?.shareId, shareUrlOverride]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setSearchText(params.get("q") || "");
+    setTagFilter(params.get("tag") || "");
+    setMentionFilter(params.get("mention") || "");
+    setDomainInclude(params.get("include") || "");
+    setDomainExclude(params.get("exclude") || "");
+    setFileType(params.get("type") || "all");
+    setGroupByDomain(params.get("group") === "1");
+    setShowDuplicates(params.get("dupes") === "1");
+    const storedView = window.localStorage.getItem("collectionViewMode");
+    if (storedView === "list" || storedView === "compare") {
+      setViewMode(storedView);
+    }
+    const storedCompact = window.localStorage.getItem("collectionCompactMode");
+    setCompactMode(storedCompact === "1");
+  }, [id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("collectionViewMode", viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("collectionCompactMode", compactMode ? "1" : "0");
+  }, [compactMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams();
+    if (searchText.trim()) params.set("q", searchText.trim());
+    if (tagFilter.trim()) params.set("tag", tagFilter.trim());
+    if (mentionFilter.trim()) params.set("mention", mentionFilter.trim());
+    if (domainInclude.trim()) params.set("include", domainInclude.trim());
+    if (domainExclude.trim()) params.set("exclude", domainExclude.trim());
+    if (fileType !== "all") params.set("type", fileType);
+    if (groupByDomain) params.set("group", "1");
+    if (showDuplicates) params.set("dupes", "1");
+    const next = params.toString();
+    const url = `${window.location.pathname}${next ? `?${next}` : ""}`;
+    window.history.replaceState({}, "", url);
+  }, [
+    searchText,
+    tagFilter,
+    mentionFilter,
+    domainInclude,
+    domainExclude,
+    fileType,
+    groupByDomain,
+    showDuplicates,
+  ]);
+
+  useEffect(() => {
     function handleDocumentClick(event) {
       const target = event.target;
       if (target && target.closest(".itemMenuWrap")) return;
@@ -104,30 +375,131 @@ export default function TripDetail() {
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
   }, []);
+
+  useEffect(() => {
+    const enableCompare = viewMode === "compare";
+    setCompareEnabled(enableCompare);
+    if (!enableCompare) {
+      setCompareSelected(new Set());
+      setCompareMode(false);
+    }
+  }, [viewMode]);
   const sortedItems = useMemo(() => {
     if (!trip?.items) return [];
     const items = [...trip.items];
 
-    if (sortMode === "oldest") {
-      return items.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
-    }
+    return items.sort((a, b) => {
+      const aPinned = !!a.pinned;
+      const bPinned = !!b.pinned;
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
 
-    if (sortMode === "notes") {
-      return items.sort((a, b) => {
+      if (sortMode === "oldest") {
+        return (a.addedAt || 0) - (b.addedAt || 0);
+      }
+
+      if (sortMode === "notes") {
         const aHas = (a.note || "").trim().length > 0;
         const bHas = (b.note || "").trim().length > 0;
         if (aHas !== bHas) return aHas ? -1 : 1;
         return (b.addedAt || 0) - (a.addedAt || 0);
-      });
-    }
+      }
 
-    return items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+      return (b.addedAt || 0) - (a.addedAt || 0);
+    });
   }, [trip, sortMode]);
 
+  const filteredState = useMemo(() => {
+    const query = normalizeText(searchText);
+    const includeList = parseDomainList(domainInclude).map((item) => item.toLowerCase());
+    const excludeList = parseDomainList(domainExclude).map((item) => item.toLowerCase());
+    const tagQuery = normalizeText(tagFilter);
+    const mentionQuery = normalizeText(mentionFilter);
+
+    let filtered = sortedItems.filter((item) => {
+      const title = normalizeText(item.title || "");
+      const url = normalizeText(item.airbnbUrl || "");
+      const domain = normalizeText(item.domain || getDomain(item.airbnbUrl));
+      const note = normalizeText(item.note || "");
+      const matchesQuery =
+        !query ||
+        title.includes(query) ||
+        url.includes(query) ||
+        domain.includes(query) ||
+        note.includes(query);
+      if (!matchesQuery) return false;
+      if (includeList.length > 0 && !includeList.includes(domain)) return false;
+      if (excludeList.length > 0 && excludeList.includes(domain)) return false;
+      if (fileType !== "all" && getFileTypeFromUrl(item.airbnbUrl) !== fileType) return false;
+      if (tagQuery) {
+        const tags = extractTags(item.note || "");
+        if (!tags.includes(tagQuery)) return false;
+      }
+      if (mentionQuery) {
+        const mentions = extractMentions(item.note || "");
+        if (!mentions.includes(mentionQuery)) return false;
+      }
+      return true;
+    });
+
+    let duplicateCount = 0;
+    const seen = new Set();
+    const deduped = [];
+    for (const item of filtered) {
+      const key = item.airbnbUrl || item.id;
+      if (seen.has(key)) {
+        duplicateCount += 1;
+        if (showDuplicates) {
+          deduped.push(item);
+        }
+      } else {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+
+    return { items: deduped, duplicateCount, total: filtered.length };
+  }, [
+    sortedItems,
+    searchText,
+    domainInclude,
+    domainExclude,
+    fileType,
+    tagFilter,
+    mentionFilter,
+    showDuplicates,
+  ]);
+
+  const filteredItems = filteredState.items;
+  const duplicateCount = filteredState.duplicateCount;
+
   const compareItems = useMemo(() => {
-    if (!trip?.items || compareSelected.size === 0) return [];
-    return trip.items.filter((item) => compareSelected.has(item.id));
-  }, [trip, compareSelected]);
+    if (!filteredItems.length || compareSelected.size === 0) return [];
+    return filteredItems.filter((item) => compareSelected.has(item.id));
+  }, [filteredItems, compareSelected]);
+
+  const groupedItems = useMemo(() => {
+    if (!groupByDomain) return [];
+    const groups = [];
+    const map = new Map();
+    filteredItems.forEach((item) => {
+      const domain = item.domain || getDomain(item.airbnbUrl) || "Unknown domain";
+      if (!map.has(domain)) {
+        const group = { domain, items: [] };
+        map.set(domain, group);
+        groups.push(group);
+      }
+      map.get(domain).items.push(item);
+    });
+    return groups;
+  }, [filteredItems, groupByDomain]);
+
+  const hasActiveFilters =
+    !!searchText.trim() ||
+    !!tagFilter.trim() ||
+    !!mentionFilter.trim() ||
+    !!domainInclude.trim() ||
+    !!domainExclude.trim() ||
+    fileType !== "all";
 
   function startEditTitle(item) {
     const parts = splitTitleParts(item.title, item.airbnbUrl);
@@ -149,17 +521,6 @@ export default function TripDetail() {
     setEditingTitle("");
   }
 
-  function toggleCompareEnabled() {
-    setCompareEnabled((prev) => {
-      const next = !prev;
-      if (!next) {
-        setCompareSelected(new Set());
-        setCompareMode(false);
-      }
-      return next;
-    });
-  }
-
   function toggleCompareItem(itemId) {
     setCompareSelected((prev) => {
       const next = new Set(prev);
@@ -168,7 +529,7 @@ export default function TripDetail() {
       } else if (next.size < 4) {
         next.add(itemId);
       } else {
-        setCompareNotice("You can compare up to 4 listings.");
+        setCompareNotice("You can compare up to 4 links.");
         setTimeout(() => setCompareNotice(""), 1600);
       }
       return next;
@@ -184,72 +545,75 @@ export default function TripDetail() {
     });
   }
 
+  function setInlineErrorMessage(message) {
+    setInlineError(message);
+    setTimeout(() => setInlineError(""), 2500);
+  }
+
+  function toggleNoteExpanded(itemId, expanded) {
+    setExpandedNotes((prev) => {
+      const next = new Set(prev);
+      if (expanded) {
+        next.add(itemId);
+      } else {
+        next.delete(itemId);
+      }
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setSearchText("");
+    setDomainInclude("");
+    setDomainExclude("");
+    setFileType("all");
+    setTagFilter("");
+    setMentionFilter("");
+  }
+
+  function handleSegmentKey(event) {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    const buttons = Array.from(event.currentTarget.querySelectorAll("button[role=\"tab\"]"));
+    const currentIndex = buttons.indexOf(event.target);
+    if (currentIndex === -1) return;
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (currentIndex + delta + buttons.length) % buttons.length;
+    buttons[nextIndex].focus();
+    buttons[nextIndex].click();
+  }
+
+  function renderNoteArea(item) {
+    const noteValue = item.note || "";
+    const isExpanded = expandedNotes.has(item.id);
+    if (isExpanded) {
+      return (
+        <textarea
+          className={`note ${compactMode ? "compact" : ""}`}
+          placeholder="Add a note (e.g. 'near beach', 'sleeps 8', 'from @creator')..."
+          value={noteValue}
+          onChange={(e) => updateItemNote(trip.id, item.id, e.target.value)}
+          onBlur={() => toggleNoteExpanded(item.id, false)}
+        />
+      );
+    }
+
+    return (
+      <button
+        className={`noteToggle ${compactMode ? "compact" : ""}`}
+        type="button"
+        onClick={() => toggleNoteExpanded(item.id, true)}
+        aria-label={noteValue.trim() ? "Edit note" : "Add note"}
+      >
+        <IconNote className="noteIcon" />
+        <span className="noteToggleText">{noteValue.trim() || "Add note…"}</span>
+      </button>
+    );
+  }
+
   function clearCompareSelection() {
     setCompareSelected(new Set());
   }
 
-  function getItemTitle(item) {
-    return (item.title || "").trim() || item.airbnbUrl;
-  }
-
-  function setCopiedMessage() {
-    setExportMsg("Copied!");
-    setTimeout(() => setExportMsg(""), 1500);
-  }
-
-  function handleCopyLinks() {
-    const text = sortedItems.map((item) => item.airbnbUrl).join("\n");
-    navigator.clipboard.writeText(text);
-    setCopiedMessage();
-    setExportOpen(false);
-  }
-
-  function handleCopyShortlist() {
-    const text = sortedItems
-      .map((item) => {
-        const title = getItemTitle(item);
-        const note = (item.note || "").trim();
-        return note
-          ? `- ${title} (${item.airbnbUrl}) — ${note}`
-          : `- ${title} (${item.airbnbUrl})`;
-      })
-      .join("\n");
-    navigator.clipboard.writeText(text);
-    setCopiedMessage();
-    setExportOpen(false);
-  }
-
-  function escapeCsv(value) {
-    const text = value == null ? "" : String(value);
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
-    }
-    return text;
-  }
-
-  function handleDownloadCsv() {
-    const header = ["title", "url", "note", "sourceText", "addedAt"].join(",");
-    const rows = sortedItems.map((item) => {
-      return [
-        escapeCsv(getItemTitle(item)),
-        escapeCsv(item.airbnbUrl),
-        escapeCsv(item.note || ""),
-        escapeCsv(item.sourceText || ""),
-        escapeCsv(item.addedAt || ""),
-      ].join(",");
-    });
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${trip.name || "trip"}-shortlist.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setExportOpen(false);
-  }
 
   async function handleToggleShare() {
     if (!trip?.shareId) {
@@ -263,7 +627,7 @@ export default function TripDetail() {
       try {
         await navigator.share({
           title: trip.name,
-          text: `${trip.name} shortlist`,
+          text: `${trip.name} ${collectionShareLabel}`,
           url: targetUrl,
         });
         return;
@@ -272,7 +636,6 @@ export default function TripDetail() {
       }
     }
     setShareOpen((v) => !v);
-    setExportOpen(false);
   }
 
   function setShareMessage(text) {
@@ -292,7 +655,7 @@ export default function TripDetail() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: item.title || "Airbnb listing",
+          title: item.title || "Saved link",
           url: item.airbnbUrl,
         });
         setItemMenuOpenId("");
@@ -315,12 +678,21 @@ export default function TripDetail() {
     }
   }
 
+  async function handleCopyItemUrl(item) {
+    if (!item?.airbnbUrl) return;
+    try {
+      await navigator.clipboard.writeText(item.airbnbUrl);
+    } catch {
+      setInlineErrorMessage("Couldn’t copy link. Try again.");
+    }
+  }
+
   async function handleSystemShare() {
     if (!shareUrlFinal || !navigator.share) return;
     try {
       await navigator.share({
         title: trip?.name,
-        text: `${trip?.name || "Trip"} shortlist`,
+        text: `${trip?.name || "Collection"} ${collectionShareLabel}`,
         url: shareUrlFinal,
       });
       setShareOpen(false);
@@ -329,24 +701,225 @@ export default function TripDetail() {
     }
   }
 
+  function renderListCard(item) {
+    const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+    const { rating, chips } = splitMetaParts(titleParts.meta);
+    const metadataChips = buildMetadataChips(item.metadata);
+    const domainLabel = item.domain || getDomain(item.airbnbUrl);
+    const allChips = [...chips, ...metadataChips];
+    const tags = extractTags(item.note || "");
+    const mentions = extractMentions(item.note || "");
+    const isSelected = compareSelected.has(item.id);
+    const disableSelect = compareSelected.size >= 4 && !isSelected;
+
+    return (
+      <div
+        key={item.id}
+        className={`itemCard ${item.pinned ? "pinned" : ""} ${compactMode ? "compact" : ""}`}
+      >
+        <div className="itemTop">
+          {compareEnabled && (
+            <label className="compareCheckbox">
+              <input
+                type="checkbox"
+                checked={isSelected}
+                disabled={disableSelect}
+                onChange={() => toggleCompareItem(item.id)}
+              />
+            </label>
+          )}
+          <div className="itemHeaderRow">
+            <div className="itemTitleBlock">
+              {editingId === item.id ? (
+                <input
+                  className="titleInput"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      saveEditTitle(item);
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelEditTitle();
+                    }
+                  }}
+                />
+              ) : (
+                <>
+                  <div className="itemTitleRow">
+                    <a
+                      className="itemTitleLink titleClampFade"
+                      href={item.airbnbUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={titleParts.main}
+                    >
+                      {titleParts.main}
+                    </a>
+                    {domainLabel && <span className="domainPill">{domainLabel}</span>}
+                    {rating && <span className="ratingPill">⭐ {rating}</span>}
+                  </div>
+                  {allChips.length > 0 && (
+                    <div className="itemMetaRow">
+                      <div className="metaChips">
+                        {allChips.map((part) => (
+                          <span key={part} className="metaChip">
+                            {part}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {(tags.length > 0 || mentions.length > 0) && (
+                    <div className="tagRow">
+                      {tags.map((tag) => (
+                        <button
+                          key={tag}
+                          className={`tagPill ${tagFilter === tag ? "active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setTagFilter(tag);
+                            setFilterOpen(true);
+                          }}
+                        >
+                          #{tag}
+                        </button>
+                      ))}
+                      {mentions.map((mention) => (
+                        <button
+                          key={mention}
+                          className={`tagPill mentionPill ${mentionFilter === mention ? "active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setMentionFilter(mention);
+                            setFilterOpen(true);
+                          }}
+                        >
+                          @{mention}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="itemActions itemActionsTop">
+              {item.pinned && (
+                <span className="itemPinInline" aria-hidden="true">
+                  <img className="itemPinIcon" src={pinIcon} alt="" />
+                </span>
+              )}
+              <div className="itemQuickActions" role="group" aria-label="Quick actions">
+                <a
+                  className="iconBtn bare quickActionBtn"
+                  href={item.airbnbUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Open link in new tab"
+                  title="Open in new tab"
+                >
+                  <IconExternal className="quickActionIcon" />
+                </a>
+                <button
+                  className="iconBtn bare quickActionBtn"
+                  type="button"
+                  onClick={() => handleCopyItemUrl(item)}
+                  aria-label="Copy link"
+                  title="Copy link"
+                >
+                  <IconCopy className="quickActionIcon" />
+                </button>
+                <button
+                  className="iconBtn bare quickActionBtn danger"
+                  type="button"
+                  onClick={() => handleRemoveItem(item.id)}
+                  aria-label="Remove from collection"
+                  title="Remove"
+                >
+                  <IconTrash className="quickActionIcon" />
+                </button>
+              </div>
+              {editingId === item.id ? (
+                <div className="itemSecondaryActions">
+                  <button className="miniBtn" type="button" onClick={() => saveEditTitle(item)}>
+                    Save
+                  </button>
+                  <button className="miniBtn" type="button" onClick={cancelEditTitle}>
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
+              <div className="itemMenuWrap">
+                <button
+                  className="itemMenuBtn"
+                  type="button"
+                  aria-label="Link options"
+                  onClick={() =>
+                    setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
+                  }
+                >
+                  ⋯
+                </button>
+                {itemMenuOpenId === item.id && (
+                  <div className="itemMenu" role="menu">
+                    {editingId !== item.id && (
+                      <button className="itemMenuItem" type="button" onClick={() => startEditTitle(item)}>
+                        Edit
+                      </button>
+                    )}
+                    <button className="itemMenuItem" type="button" onClick={() => openItemShare(item)}>
+                      Share
+                    </button>
+                    <button
+                      className="itemMenuItem"
+                      type="button"
+                      onClick={() => toggleItemPinned(trip.id, item.id, !item.pinned)}
+                    >
+                      {item.pinned ? "Unpin" : "Pin"}
+                    </button>
+                    <button
+                      className="itemMenuItem danger"
+                      type="button"
+                      onClick={() => handleRemoveItem(item.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {renderNoteArea(item)}
+
+        {item.sourceText && (
+          <div className="source">
+            <span className="sourceLabel">Source:</span> {item.sourceText}
+          </div>
+        )}
+      </div>
+    );
+  }
+
 
   if (!user && !loading) {
     return (
       <div className="page">
         <div className="card glow">
           <h1>
-            Trip <span>Access</span>
+            Collection <span>Access</span>
           </h1>
 
           <div className="content">
-            <p className="muted">Sign in to view and edit your trips.</p>
+            <p className="muted">Sign in to view and edit your collections.</p>
             <LoginForm />
             <div className="navRow">
               <Link className="miniBtn linkBtn" to="/login">
                 Sign in
-              </Link>
-              <Link className="miniBtn linkBtn" to="/">
-                Extractor
               </Link>
             </div>
           </div>
@@ -361,18 +934,15 @@ export default function TripDetail() {
       <div className="page">
         <div className="card glow">
           <h1>
-            Trip <span>Not found</span>
+            Collection <span>Not found</span>
           </h1>
 
           <div className="content">
-            <p className="muted">That trip doesn’t exist (it may have been deleted).</p>
+            <p className="muted">That collection doesn’t exist (it may have been deleted).</p>
 
             <div className="navRow">
               <Link className="miniBtn linkBtn" to="/trips">
-                ← Back to Trips
-              </Link>
-              <Link className="miniBtn linkBtn" to="/">
-                Extractor
+                ← Back to Collections
               </Link>
             </div>
           </div>
@@ -384,15 +954,196 @@ export default function TripDetail() {
   return (
     <div className="page">
       <div className="card glow">
-        <div className="tripTitleRow">
-          <h1>
-            {trip.name} <span>Shortlist</span>
-          </h1>
-          {trip.items.length > 0 && (
-            <button className="iconBtn bare" type="button" onClick={handleToggleShare}>
-              <img className="iconImg" src={shareIcon} alt="Share" />
-            </button>
-          )}
+        <div className="detailHeader">
+          <div className="detailHeaderBar">
+            <Link className="miniBtn linkBtn" to="/trips">
+              ← Collections
+            </Link>
+            {hasItems && (
+              <button
+                className="iconBtn bare"
+                type="button"
+                onClick={handleToggleShare}
+                aria-label="Share collection"
+              >
+                <img className="iconImg" src={shareIcon} alt="" />
+              </button>
+            )}
+          </div>
+
+          <div className="detailHeaderTitle">
+            <h1 className="titleClamp">{trip.name}</h1>
+            <div className="detailSubtitle">{collectionLabel === "Shortlist" ? "Travel shortlist" : collectionLabel === "Fashion list" ? "Fashion list" : "Collection"}</div>
+          </div>
+
+          <div className="detailHeaderActions">
+            <div className="detailToolbar">
+              <div className="toolbarLeft">
+                <div
+                  className="segmentedControl"
+                  role="tablist"
+                  aria-label="View mode"
+                  onKeyDown={handleSegmentKey}
+                >
+                  <button
+                    className={`segmentedBtn ${viewMode === "list" ? "active" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === "list"}
+                    onClick={() => setViewMode("list")}
+                  >
+                    <IconList className="segIcon" />
+                    <span>List</span>
+                  </button>
+                  <button
+                    className={`segmentedBtn ${viewMode === "compare" ? "active" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === "compare"}
+                    onClick={() => hasItems && setViewMode("compare")}
+                    disabled={!hasItems}
+                  >
+                    <IconCompare className="segIcon" />
+                    <span>Compare</span>
+                  </button>
+                </div>
+
+                <div className="sortRow inline">
+                  <label className="sortLabel" htmlFor="sortItems">
+                    Sort
+                  </label>
+                  <select
+                    id="sortItems"
+                    className="select sortSelect"
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value)}
+                  >
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="notes">Notes first</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="toolbarRight" />
+            </div>
+
+            <div className="filterRow">
+              <div className="searchWrap">
+                <input
+                  className="input searchInput"
+                  type="search"
+                  placeholder="Search title, URL, domain, notes"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  aria-label="Search collection"
+                />
+                {searchText && (
+                  <button className="miniBtn ghostBtn" type="button" onClick={() => setSearchText("")}>
+                    Clear
+                  </button>
+                )}
+              </div>
+              <button
+                className={`miniBtn ${filterOpen ? "active" : ""}`}
+                type="button"
+                onClick={() => setFilterOpen((v) => !v)}
+                aria-expanded={filterOpen}
+                aria-controls="collectionFilters"
+              >
+                Filters
+              </button>
+              {(tagFilter || mentionFilter) && (
+                <button
+                  className="miniBtn"
+                  type="button"
+                  onClick={() => {
+                    setTagFilter("");
+                    setMentionFilter("");
+                  }}
+                >
+                  Clear tag
+                </button>
+              )}
+            </div>
+
+            {filterOpen && (
+              <div className="filterPanel" id="collectionFilters">
+                <div className="filterGroup">
+                  <label className="filterLabel" htmlFor="includeDomains">
+                    Include domains
+                  </label>
+                  <input
+                    id="includeDomains"
+                    className="input filterInput"
+                    placeholder="airbnb.com, nytimes.com"
+                    value={domainInclude}
+                    onChange={(e) => setDomainInclude(e.target.value)}
+                  />
+                </div>
+                <div className="filterGroup">
+                  <label className="filterLabel" htmlFor="excludeDomains">
+                    Exclude domains
+                  </label>
+                  <input
+                    id="excludeDomains"
+                    className="input filterInput"
+                    placeholder="spam.com, tiktok.com"
+                    value={domainExclude}
+                    onChange={(e) => setDomainExclude(e.target.value)}
+                  />
+                </div>
+                <div className="filterGroup">
+                  <label className="filterLabel" htmlFor="fileType">
+                    File type
+                  </label>
+                  <select
+                    id="fileType"
+                    className="select filterSelect"
+                    value={fileType}
+                    onChange={(e) => setFileType(e.target.value)}
+                  >
+                    <option value="all">All types</option>
+                    <option value="pdf">PDF</option>
+                    <option value="image">Image</option>
+                    <option value="video">Video</option>
+                    <option value="audio">Audio</option>
+                    <option value="doc">Doc</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="filterToggles">
+                  <label className="miniToggle">
+                    <span>Compact mode</span>
+                    <span className="switch">
+                      <input
+                        type="checkbox"
+                        checked={compactMode}
+                        onChange={() => setCompactMode((prev) => !prev)}
+                      />
+                      <span className="slider" />
+                    </span>
+                  </label>
+                  <label className="miniToggle">
+                    <span>Group by domain</span>
+                    <span className="switch">
+                      <input
+                        type="checkbox"
+                        checked={groupByDomain}
+                        onChange={() => setGroupByDomain((prev) => !prev)}
+                      />
+                      <span className="slider" />
+                    </span>
+                  </label>
+                </div>
+                {hasActiveFilters && (
+                  <button className="miniBtn" type="button" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
           <div className="sharedByLine">
@@ -401,31 +1152,11 @@ export default function TripDetail() {
         )}
 
         <div className="content">
-          <div className="navRow">
-            <Link className="miniBtn linkBtn" to="/trips">
-              ← Trips
-            </Link>
-            <Link className="miniBtn linkBtn" to="/">
-              Extractor
-            </Link>
-            {trip.items.length > 0 && (
-              <button className="miniBtn" type="button" onClick={toggleCompareEnabled}>
-                {compareEnabled ? "Done" : "Compare"}
-              </button>
-            )}
-            {trip.items.length > 0 && (
-              <button
-                className="miniBtn"
-                type="button"
-                onClick={() => {
-                  setExportOpen((v) => !v);
-                  setShareOpen(false);
-                }}
-              >
-                {exportOpen ? "Close Export" : "Export"}
-              </button>
-            )}
-          </div>
+          {inlineError && (
+            <div className="inlineError" role="status">
+              {inlineError}
+            </div>
+          )}
 
           {shareOpen && (trip.shareId || shareUrlOverride) && (
             <div
@@ -437,7 +1168,7 @@ export default function TripDetail() {
               <div className="shareModal" onClick={(e) => e.stopPropagation()}>
                 <div className="shareModalHeader">
                   <div>
-                    <div className="shareModalTitle">Share trip</div>
+                    <div className="shareModalTitle">Share collection</div>
                     <div className="shareModalSubtitle">{trip.name}</div>
                   </div>
                   <button
@@ -473,26 +1204,6 @@ export default function TripDetail() {
             </div>
           )}
 
-          {exportOpen && (
-            <div className="exportPanel">
-              <div className="exportHeader">
-                <div className="exportTitle">Export</div>
-                {exportMsg && <div className="exportMsg">{exportMsg}</div>}
-              </div>
-              <div className="exportActions">
-                <button className="miniBtn" type="button" onClick={handleCopyLinks}>
-                  Copy links
-                </button>
-                <button className="miniBtn" type="button" onClick={handleCopyShortlist}>
-                  Copy shortlist
-                </button>
-                <button className="miniBtn" type="button" onClick={handleDownloadCsv}>
-                  Download CSV
-                </button>
-              </div>
-            </div>
-          )}
-
           {itemShare && (
             <div
               className="shareOverlay"
@@ -503,9 +1214,9 @@ export default function TripDetail() {
               <div className="shareModal" onClick={(e) => e.stopPropagation()}>
                 <div className="shareModalHeader">
                   <div>
-                    <div className="shareModalTitle">Share listing</div>
+                    <div className="shareModalTitle">Share link</div>
                     <div className="shareModalSubtitle">
-                      {(itemShare.title || "").trim() || "Airbnb listing"}
+                      {(itemShare.title || "").trim() || "Saved link"}
                     </div>
                   </div>
                   <button
@@ -540,11 +1251,42 @@ export default function TripDetail() {
           )}
 
           {trip.items.length === 0 ? (
-            <p className="muted">
-              No links saved yet. Go to the extractor and save one to this trip.
-            </p>
+            <div className="emptyState">
+              <div className="emptyTitle">Nothing here yet — stash something.</div>
+              <div className="emptyText">
+                Save your first link to this collection.
+              </div>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="emptyState">
+              <div className="emptyTitle">Nothing found</div>
+              <div className="emptyText">
+                Try another search or clear filters.
+              </div>
+              {hasActiveFilters && (
+                <button className="miniBtn" type="button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
           ) : (
-            <div className="itemList">
+            <div className={`itemList ${compactMode ? "compact" : ""}`}>
+              {duplicateCount > 0 && (
+                <div className="dupeNotice">
+                  <span>
+                    {duplicateCount} duplicate{duplicateCount === 1 ? "" : "s"}{" "}
+                    {showDuplicates ? "shown" : "hidden"}.
+                  </span>
+                  <button
+                    className="miniBtn"
+                    type="button"
+                    onClick={() => setShowDuplicates((prev) => !prev)}
+                  >
+                    {showDuplicates ? "Hide duplicates" : "Show duplicates"}
+                  </button>
+                </div>
+              )}
+
               {compareMode ? (
                 <div className="compareView">
                   <div className="compareHeader">
@@ -568,11 +1310,19 @@ export default function TripDetail() {
                   <div className={`compareGrid count-${compareItems.length}`}>
                     {compareItems.map((item) => {
                       const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+                      const metadataChips = buildMetadataChips(item.metadata);
+                      const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                      const tags = extractTags(item.note || "");
+                      const mentions = extractMentions(item.note || "");
+                      const displayChips = [...titleParts.meta, ...metadataChips];
                       return (
-                        <div key={item.id} className="itemCard compareCard">
+                        <div
+                          key={item.id}
+                          className={`itemCard compareCard ${item.pinned ? "pinned" : ""}`}
+                        >
                           <div className="compareCardHeader">
                             <a
-                              className="itemLink compareTitle"
+                              className="itemLink compareTitle titleClampFade"
                               href={item.airbnbUrl}
                               target="_blank"
                               rel="noreferrer"
@@ -580,24 +1330,86 @@ export default function TripDetail() {
                             >
                               {titleParts.main}
                             </a>
+                            {domainLabel && <span className="domainPill">{domainLabel}</span>}
 
-                            {titleParts.meta.length > 0 && (
+                            {(displayChips.length > 0 || tags.length > 0 || mentions.length > 0) && (
                               <div className="compareMeta">
-                                {titleParts.meta.map((part) => (
+                                {displayChips.map((part) => (
                                   <span key={part} className="chip">
                                     {part}
                                   </span>
+                                ))}
+                                {tags.map((tag) => (
+                                  <button
+                                    key={tag}
+                                    className={`tagPill ${tagFilter === tag ? "active" : ""}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setTagFilter(tag);
+                                      setFilterOpen(true);
+                                    }}
+                                  >
+                                    #{tag}
+                                  </button>
+                                ))}
+                                {mentions.map((mention) => (
+                                  <button
+                                    key={mention}
+                                    className={`tagPill mentionPill ${mentionFilter === mention ? "active" : ""}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setMentionFilter(mention);
+                                      setFilterOpen(true);
+                                    }}
+                                  >
+                                    @{mention}
+                                  </button>
                                 ))}
                               </div>
                             )}
                           </div>
 
                           <div className="compareActionsRow">
+                            {item.pinned && (
+                              <span className="itemPinInline" aria-hidden="true">
+                                <img className="itemPinIcon" src={pinIcon} alt="" />
+                              </span>
+                            )}
+                            <div className="itemQuickActions" role="group" aria-label="Quick actions">
+                              <a
+                                className="iconBtn bare quickActionBtn"
+                                href={item.airbnbUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label="Open link in new tab"
+                                title="Open in new tab"
+                              >
+                                <IconExternal className="quickActionIcon" />
+                              </a>
+                              <button
+                                className="iconBtn bare quickActionBtn"
+                                type="button"
+                                onClick={() => handleCopyItemUrl(item)}
+                                aria-label="Copy link"
+                                title="Copy link"
+                              >
+                                <IconCopy className="quickActionIcon" />
+                              </button>
+                              <button
+                                className="iconBtn bare quickActionBtn danger"
+                                type="button"
+                                onClick={() => handleRemoveItem(item.id)}
+                                aria-label="Remove from collection"
+                                title="Remove"
+                              >
+                                <IconTrash className="quickActionIcon" />
+                              </button>
+                            </div>
                             <div className="itemMenuWrap">
                               <button
                                 className="itemMenuBtn"
                                 type="button"
-                                aria-label="Listing options"
+                                aria-label="Link options"
                                 onClick={() =>
                                   setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
                                 }
@@ -606,13 +1418,16 @@ export default function TripDetail() {
                               </button>
                               {itemMenuOpenId === item.id && (
                                 <div className="itemMenu" role="menu">
+                                  <button className="itemMenuItem" type="button" onClick={() => openItemShare(item)}>
+                                    Share
+                                  </button>
                                   <button
-                                  className="itemMenuItem"
-                                  type="button"
-                                  onClick={() => openItemShare(item)}
-                                >
-                                  Share
-                                </button>
+                                    className="itemMenuItem"
+                                    type="button"
+                                    onClick={() => toggleItemPinned(trip.id, item.id, !item.pinned)}
+                                  >
+                                    {item.pinned ? "Unpin" : "Pin"}
+                                  </button>
                                   <button
                                     className="itemMenuItem danger"
                                     type="button"
@@ -625,165 +1440,46 @@ export default function TripDetail() {
                             </div>
                           </div>
 
-                          <textarea
-                            className="note compact"
-                            placeholder="Add a note (e.g. 'near beach', 'sleeps 8', 'from @creator')..."
-                            value={item.note || ""}
-                            onChange={(e) => updateItemNote(trip.id, item.id, e.target.value)}
-                          />
+                          {renderNoteArea(item)}
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div className="sortRow">
-                    <label className="sortLabel" htmlFor="sortItems">
-                      Sort
-                    </label>
-                    <select
-                      id="sortItems"
-                      className="select sortSelect"
-                      value={sortMode}
-                      onChange={(e) => setSortMode(e.target.value)}
-                    >
-                      <option value="newest">Newest first</option>
-                      <option value="oldest">Oldest first</option>
-                      <option value="notes">Notes first</option>
-                    </select>
-                  </div>
-
-                  {sortedItems.map((item) => {
-                    const titleParts = splitTitleParts(item.title, item.airbnbUrl);
-                    const { rating, chips } = splitMetaParts(titleParts.meta);
-                    const isSelected = compareSelected.has(item.id);
-                    const disableSelect = compareSelected.size >= 4 && !isSelected;
-
+              ) : groupByDomain ? (
+                <div className="groupList">
+                  {groupedItems.map((group) => {
+                    const isCollapsed = !!collapsedDomains[group.domain];
                     return (
-                      <div key={item.id} className="itemCard">
-                        <div className="itemTop">
-                          {compareEnabled && (
-                            <label className="compareCheckbox">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                disabled={disableSelect}
-                                onChange={() => toggleCompareItem(item.id)}
-                              />
-                            </label>
-                          )}
-                          <div className="itemHeaderRow">
-                            <div className="itemTitleBlock">
-                              {editingId === item.id ? (
-                                <input
-                                  className="titleInput"
-                                  value={editingTitle}
-                                  onChange={(e) => setEditingTitle(e.target.value)}
-                                />
-                              ) : (
-                                <>
-                                  <div className="itemTitleRow">
-                                    <a
-                                      className="itemTitleLink"
-                                      href={item.airbnbUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      {titleParts.main}
-                                    </a>
-                                    {rating && <span className="ratingPill">⭐ {rating}</span>}
-                                  </div>
-                                  {chips.length > 0 && (
-                                    <div className="itemMetaRow">
-                                      <div className="metaChips">
-                                        {chips.map((part) => (
-                                          <span key={part} className="metaChip">
-                                            {part}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-
-                            <div className="itemActions itemActionsTop">
-                              {editingId === item.id ? (
-                                <div className="itemSecondaryActions">
-                                  <button
-                                    className="miniBtn"
-                                    type="button"
-                                    onClick={() => saveEditTitle(item)}
-                                  >
-                                    Save
-                                  </button>
-                                  <button className="miniBtn" type="button" onClick={cancelEditTitle}>
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : null}
-                              <div className="itemMenuWrap">
-                                <button
-                                  className="itemMenuBtn"
-                                  type="button"
-                                  aria-label="Listing options"
-                                  onClick={() =>
-                                    setItemMenuOpenId((prev) => (prev === item.id ? "" : item.id))
-                                  }
-                                >
-                                  ⋯
-                                </button>
-                                {itemMenuOpenId === item.id && (
-                                  <div className="itemMenu" role="menu">
-                                    {editingId !== item.id && (
-                                      <button
-                                        className="itemMenuItem"
-                                        type="button"
-                                        onClick={() => startEditTitle(item)}
-                                      >
-                                        Edit
-                                      </button>
-                                    )}
-                                    <button
-                                      className="itemMenuItem"
-                                      type="button"
-                                      onClick={() => openItemShare(item)}
-                                    >
-                                      Share
-                                    </button>
-                                    <button
-                                      className="itemMenuItem danger"
-                                      type="button"
-                                      onClick={() => handleRemoveItem(item.id)}
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <textarea
-                          className="note compact"
-                          placeholder="Add a note (e.g. 'near beach', 'sleeps 8', 'from @creator')..."
-                          value={item.note || ""}
-                          onChange={(e) => updateItemNote(trip.id, item.id, e.target.value)}
-                        />
-
-                        {/* Only show source text if it's useful */}
-                        {item.sourceText && (
-                          <div className="source">
-                            <span className="sourceLabel">Source:</span> {item.sourceText}
+                      <div key={group.domain} className="domainGroup">
+                        <button
+                          className="domainHeader"
+                          type="button"
+                          onClick={() =>
+                            setCollapsedDomains((prev) => ({
+                              ...prev,
+                              [group.domain]: !prev[group.domain],
+                            }))
+                          }
+                          aria-expanded={!isCollapsed}
+                        >
+                          <span className="domainTitle">{group.domain}</span>
+                          <span className="domainCount">{group.items.length}</span>
+                          <span className={`domainChevron ${isCollapsed ? "collapsed" : ""}`}>
+                            &gt;
+                          </span>
+                        </button>
+                        {!isCollapsed && (
+                          <div className="domainItems">
+                            {group.items.map((item) => renderListCard(item))}
                           </div>
                         )}
                       </div>
                     );
                   })}
-                </>
+                </div>
+              ) : (
+                filteredItems.map((item) => renderListCard(item))
               )}
 
               {compareEnabled && !compareMode && compareSelected.size >= 2 && (

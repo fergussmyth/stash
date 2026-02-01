@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Stash",
+  "version": "0.1.0",
+  "description": "Save links to your stashes.",
+  "icons": {
+    "16": "assets/icons/stash-icon-16.png",
+    "32": "assets/icons/stash-icon-32.png",
+    "48": "assets/icons/stash-icon-48.png",
+    "128": "assets/icons/stash-icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["<all_urls>"]
+}

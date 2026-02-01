@@ -7,7 +7,9 @@ import { TripsProvider } from "./hooks/useTrips";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
+import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
+import stashLogo from "./assets/icons/stash-favicon.png";
 
 function AppShell() {
   const location = useLocation();
@@ -18,21 +20,26 @@ function AppShell() {
     <>
       {!hideNav && (
         <div className="topNav">
-          <Link className="topNavLink" to="/">
-            Extractor
-          </Link>
-          <Link className="topNavLink" to="/trips">
-            Trips
-          </Link>
-          {user ? (
-            <Link className="topNavLink iconLink" to="/profile" aria-label="Profile">
-              <img className="topNavIcon" src={userIcon} alt="" aria-hidden="true" />
+          <div className="topNavInner">
+            <Link className="topNavBrand" to="/" aria-label="Stash home">
+              <img className="logo logo-icon" src={stashLogo} alt="Stash logo" />
+              <span>Stash</span>
             </Link>
-          ) : (
-            <Link className="topNavLink" to="/login">
-              Sign in
-            </Link>
-          )}
+            <div className="topNavLinks">
+              <Link className="topNavLink" to="/trips">
+                Stashes
+              </Link>
+              {user ? (
+                <Link className="topNavLink iconLink" to="/profile" aria-label="Profile">
+                  <img className="topNavIcon" src={userIcon} alt="" aria-hidden="true" />
+                </Link>
+              ) : (
+                <Link className="topNavLink" to="/login">
+                  Sign in
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -42,6 +49,7 @@ function AppShell() {
         <Route path="/trips" element={<Trips />} />
         <Route path="/trips/:id" element={<TripDetail />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/settings/extension" element={<ExtensionSettings />} />
         <Route path="/share/:shareId" element={<ShareTrip />} />
       </Routes>
     </>

@@ -8,6 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 const titleCache = new Map();
+const universalTitleCache = new Map();
 
 function cleanAirbnbUrl(url) {
   try {
@@ -49,6 +50,96 @@ function looksLikeNotFoundTitle(title = "") {
     t.includes("not available") ||
     t.includes("listing is no longer available")
   );
+}
+
+function extractTitleFromHtml(html = "") {
+  const ogMatch = html.match(/<meta[^>]+property=[\"']og:title[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>/i);
+  if (ogMatch && ogMatch[1]) return ogMatch[1].trim();
+  const twitterMatch = html.match(/<meta[^>]+name=[\"']twitter:title[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>/i);
+  if (twitterMatch && twitterMatch[1]) return twitterMatch[1].trim();
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch && titleMatch[1]) return titleMatch[1].trim();
+  return "";
+}
+
+function extractJsonLdTitle(html = "") {
+  const scripts = html.match(/<script[^>]+type=[\"']application\/ld\+json[\"'][^>]*>[\s\S]*?<\/script>/gi);
+  if (!scripts) return "";
+  for (const script of scripts) {
+    const jsonText = script.replace(/^[\s\S]*?>/, "").replace(/<\/script>[\s\S]*$/, "").trim();
+    if (!jsonText) continue;
+    try {
+      const parsed = JSON.parse(jsonText);
+      const candidates = Array.isArray(parsed) ? parsed : [parsed];
+      for (const entry of candidates) {
+        const type = entry?.["@type"];
+        if (type === "Product" && entry?.name) return String(entry.name).trim();
+        if (!type && entry?.name) return String(entry.name).trim();
+      }
+    } catch {
+      // ignore bad JSON-LD
+    }
+  }
+  return "";
+}
+
+function decodeJsonString(input = "") {
+  try {
+    return JSON.parse(`"${input.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+  } catch {
+    return input;
+  }
+}
+
+function findProductNameFromObject(input) {
+  const queue = [input];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (typeof current.productName === "string" && current.productName.trim()) {
+      return current.productName.trim();
+    }
+    if (
+      typeof current.name === "string" &&
+      current.name.trim() &&
+      (current.productId || current.productCode || current.sku || current.id)
+    ) {
+      return current.name.trim();
+    }
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") queue.push(value);
+    }
+  }
+  return "";
+}
+
+function extractAsosTitleFromHtml(html = "") {
+  const nextDataMatch = html.match(
+    /<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i
+  );
+  if (nextDataMatch && nextDataMatch[1]) {
+    try {
+      const parsed = JSON.parse(nextDataMatch[1]);
+      const name = findProductNameFromObject(parsed);
+      if (name) return name;
+    } catch {
+      // ignore JSON errors
+    }
+  }
+
+  const productNameMatch = html.match(/"productName"\s*:\s*"([^"]+)"/i);
+  if (productNameMatch && productNameMatch[1]) {
+    return decodeJsonString(productNameMatch[1]).trim();
+  }
+
+  const nameWithProductIdMatch = html.match(
+    /"name"\s*:\s*"([^"]+)"\s*,\s*"product(?:Id|Code)"\s*:\s*"?\d+/i
+  );
+  if (nameWithProductIdMatch && nameWithProductIdMatch[1]) {
+    return decodeJsonString(nameWithProductIdMatch[1]).trim();
+  }
+
+  return "";
 }
 
 app.post("/check-airbnb", async (req, res) => {
@@ -258,6 +349,164 @@ app.post("/fetch-airbnb-title", async (req, res) => {
       // ignore close errors
     }
   }
+});
+
+app.post("/fetch-title", async (req, res) => {
+  const { url } = req.body;
+
+  if (!url || typeof url !== "string") {
+    return res.json({ title: null });
+  }
+
+  const cleanedUrl = url.trim();
+  if (!/^https?:\/\//i.test(cleanedUrl)) {
+    return res.json({ title: null });
+  }
+  if (universalTitleCache.has(cleanedUrl)) {
+    return res.json({ title: universalTitleCache.get(cleanedUrl) });
+  }
+
+  const overallTimeoutMs = 7000;
+  let responded = false;
+  const safeRespond = (payload) => {
+    if (responded) return;
+    responded = true;
+    res.json(payload);
+  };
+
+  const trySimpleFetch = async () => {
+    const response = await fetch(cleanedUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    if (!response.ok) return "";
+
+    const html = await response.text();
+    let title = extractTitleFromHtml(html);
+    if (!title) {
+      title = extractJsonLdTitle(html);
+    }
+    if (!title) {
+      let host = "";
+      try {
+        host = new URL(cleanedUrl).hostname.toLowerCase();
+      } catch {
+        host = "";
+      }
+      if (host.includes("asos.com")) {
+        title = extractAsosTitleFromHtml(html);
+      }
+    }
+    if (title && !looksLikeNotFoundTitle(title)) return title;
+    return "";
+  };
+
+  const tryPlaywright = async () => {
+    let browser;
+    let page;
+    try {
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      });
+      page = await context.newPage();
+      await page.goto(cleanedUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 4000 });
+      } catch {
+        // best effort
+      }
+
+      const ogTitle = await page
+        .$eval('meta[property="og:title"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const twitterTitle = await page
+        .$eval('meta[name="twitter:title"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const docTitle = (await page.title().catch(() => "")) || "";
+      let rawTitle = (ogTitle || twitterTitle || docTitle || "").trim();
+
+      if (!rawTitle) {
+        const jsonLdTitle = await page
+          .$$eval('script[type="application/ld+json"]', (nodes) => {
+            for (const node of nodes) {
+              try {
+                const text = node.textContent || "";
+                if (!text) continue;
+                const parsed = JSON.parse(text);
+                const list = Array.isArray(parsed) ? parsed : [parsed];
+                for (const entry of list) {
+                  const type = entry?.["@type"];
+                  if (type === "Product" && entry?.name) return entry.name;
+                  if (!type && entry?.name) return entry.name;
+                }
+              } catch {
+                // ignore
+              }
+            }
+            return null;
+          })
+          .catch(() => null);
+        rawTitle = (jsonLdTitle || "").trim();
+      }
+
+      if (!rawTitle) {
+        const html = await page.content().catch(() => "");
+        if (html) {
+          let host = "";
+          try {
+            host = new URL(cleanedUrl).hostname.toLowerCase();
+          } catch {
+            host = "";
+          }
+          if (host.includes("asos.com")) {
+            rawTitle = extractAsosTitleFromHtml(html);
+          }
+        }
+      }
+
+      if (rawTitle && !looksLikeNotFoundTitle(rawTitle)) return rawTitle;
+      return "";
+    } finally {
+      try {
+        if (page) await page.close();
+      } catch {}
+      try {
+        if (browser) await browser.close();
+      } catch {}
+    }
+  };
+
+  const timeoutPromise = new Promise((resolve) =>
+    setTimeout(() => resolve("__timeout__"), overallTimeoutMs)
+  );
+
+  try {
+    const quickTitle = await Promise.race([trySimpleFetch(), timeoutPromise]);
+    if (quickTitle && quickTitle !== "__timeout__") {
+      universalTitleCache.set(cleanedUrl, quickTitle);
+      return safeRespond({ title: quickTitle });
+    }
+
+    const pwTitle = await Promise.race([tryPlaywright(), timeoutPromise]);
+    if (pwTitle && pwTitle !== "__timeout__") {
+      universalTitleCache.set(cleanedUrl, pwTitle);
+      return safeRespond({ title: pwTitle });
+    }
+  } catch (err) {
+    console.log("FETCH TITLE ERROR:", err?.message);
+  }
+
+  universalTitleCache.set(cleanedUrl, null);
+  return safeRespond({ title: null });
 });
 
 app.listen(5000, () => {

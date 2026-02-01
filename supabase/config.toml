@@ -1,0 +1,8 @@
+[functions.token-create]
+verify_jwt = false
+
+[functions.extension-collections]
+verify_jwt = false
+
+[functions.extension-save]
+verify_jwt = false

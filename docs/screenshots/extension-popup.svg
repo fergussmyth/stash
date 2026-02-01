@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="750" viewBox="0 0 1200 750">
+  <rect width="1200" height="750" fill="#0b1224" />
+  <rect x="140" y="120" width="920" height="510" rx="24" fill="#111b2f" stroke="#1e293b" />
+  <text x="600" y="300" fill="#e2e8f0" font-size="36" font-family="Arial, sans-serif" text-anchor="middle">
+    Extension Popup
+  </text>
+  <text x="600" y="350" fill="#94a3b8" font-size="18" font-family="Arial, sans-serif" text-anchor="middle">
+    Replace with real screenshot
+  </text>
+</svg>
