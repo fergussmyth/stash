@@ -229,14 +229,15 @@ export default function ShareTrip() {
                             : [];
                       return (
                         <div className="itemTitleBlock">
-                          <a
+                          <button
                             className="itemTitleLink"
-                            href={item.airbnbUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                            type="button"
+                            onClick={() =>
+                              window.open(item.airbnbUrl, "_blank", "noopener,noreferrer")
+                            }
                           >
                             {titleParts.main}
-                          </a>
+                          </button>
                           {(rating || chips.length > 0 || displayChips.length > 0) && (
                             <div className="itemMetaRow">
                               {rating && <span className="ratingPill">⭐ {rating}</span>}

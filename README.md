@@ -7,14 +7,15 @@ Stash lives in the browser so you can save a page the moment you see it.
 
 ## Screenshots
 ![Stash extension popup](image.png)
-![Stash extension settings](image-1.png)
-![Stash web app](image-2.png)
+![Stashes collections page](image-1.png)
+![Stash decision workspace](image-2.png)
 
 ## What it does
-- Save Airbnb links from pasted text (including short/slink URLs).
-- Save links to collections with titles, notes, and metadata chips.
+- Save Airbnb links from pasted text (including short/slink URLs) or the browser extension.
+- Organize links into collections with titles, notes, tags, and cover images.
+- Review listings in a decision workspace with shortlist and chosen states.
 - Bulk selection, auto-open control, and duplicate detection.
-- Compare up to 4 listings side-by-side.
+- Compare up to 4 listings side-by-side and resolve decision groups.
 - Share read-only collection links with friends.
 
 ## Run locally

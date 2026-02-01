@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
+import Dropdown from "../components/Dropdown";
 import { LoginForm } from "./Login";
+import AppShell from "../components/AppShell";
+import SidebarNav from "../components/SidebarNav";
+import TopBar from "../components/TopBar";
+import stashLogo from "../assets/icons/stash-favicon.png";
+import userIcon from "../assets/icons/user.png";
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -145,13 +152,13 @@ async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
 export default function Home() {
   const { trips, createTrip, addItemToTrip, user } = useTrips();
   const textareaRef = useRef(null);
+  const navigate = useNavigate();
 
   const [comment, setComment] = useState("");
   const [link, setLink] = useState("");
   const [linkMeta, setLinkMeta] = useState(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
-  const [copied, setCopied] = useState(false);
   const [autoRedirect, setAutoRedirect] = useState(false);
   const [hasAttempted, setHasAttempted] = useState(false);
 
@@ -164,8 +171,8 @@ export default function Home() {
   const [toastMsg, setToastMsg] = useState("");
   const [linksFound, setLinksFound] = useState(0);
   const [lastSavedTripId, setLastSavedTripId] = useState("");
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [showNewStash, setShowNewStash] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingCreateRef = useRef(false);
 
   const pendingTripKey = "pending_trip_create_name";
@@ -211,6 +218,14 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const tripsForSelect = useMemo(() => trips.slice().reverse(), [trips]);
+  const categoryCounts = useMemo(
+    () =>
+      ["general", "travel", "fashion"].reduce((acc, category) => {
+        acc[category] = trips.filter((trip) => (trip.type || "general") === category).length;
+        return acc;
+      }, {}),
+    [trips]
+  );
   const selectedTrip = useMemo(
     () => trips.find((trip) => trip.id === selectedTripId),
     [trips, selectedTripId]
@@ -228,19 +243,12 @@ export default function Home() {
     setLinkMeta(null);
     setError("");
     setWarning("");
-    setCopied(false);
     setHasAttempted(false);
     setSavedMsg("");
     setBulkLinks([]);
     setSelectedIds(new Set());
     setLinksFound(0);
     setLastSavedTripId("");
-  }
-
-  function copyToClipboard() {
-    navigator.clipboard.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   }
 
   async function pasteFromClipboard() {
@@ -400,7 +408,6 @@ export default function Home() {
     setWarning("");
     setSavedMsg("");
     setLink("");
-    setCopied(false);
     setHasAttempted(true);
     setBulkLinks([]);
     setSelectedIds(new Set());
@@ -525,174 +532,150 @@ export default function Home() {
   }
 
   return (
-    <div className="page page--home">
-      <div className="card glow">
-        <h1>
-          Ready to <span>stash</span>
-        </h1>
-        <p className="heroSubtitle">Stash links, notes, and things you'll want later.</p>
-
-        <div className="content">
-          {toastMsg && <div className="toast">{toastMsg}</div>}
-
-          <textarea
-            ref={textareaRef}
-            className="input textarea dropzone"
-            placeholder="Paste a link, text, or anything you want to stash..."
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            onFocus={() => setIsInputFocused(true)}
-            onBlur={() => setIsInputFocused(false)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                event.preventDefault();
-                extractLinks();
-              }
+    <div className="page tripsPage collectionsShell homeShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <AppShell
+        sidebar={
+          <SidebarNav
+            brandIcon={
+              <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+            }
+            activeSection={null}
+            categoryCounts={categoryCounts}
+            onSelectSection={(category) => {
+              navigate(`/trips?category=${category}`);
+              setSidebarOpen(false);
             }}
+            onNavigate={() => setSidebarOpen(false)}
           />
-          <div className="hint">Tip: paste multiple links at once.</div>
-          {!comment && !link && bulkLinks.length === 0 && !isInputFocused && (
-            <div className="emptyPrompt">Your stash starts here.</div>
-          )}
+        }
+        topbar={
+          <TopBar
+            title="Ready to stash"
+            subtitle="Paste links and stash them in seconds."
+            searchValue=""
+            onSearchChange={() => {}}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            actions={
+              <>
+                {user ? (
+                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                    <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
+                  </Link>
+                ) : (
+                  <Link className="topbarPill subtle" to="/login">
+                    Sign in
+                  </Link>
+                )}
+              </>
+            }
+          />
+        }
+        isSidebarOpen={sidebarOpen}
+        onCloseSidebar={() => setSidebarOpen(false)}
+      >
+        {toastMsg && <div className="toast">{toastMsg}</div>}
 
-          {!link && bulkLinks.length === 0 && (
-            <div className="primaryRow">
-              <button className="primary-btn primary-btn--dominant" onClick={extractLinks}>
-                Stash
-              </button>
+        <div className="homeGrid">
+          <section className="panel p-5 homeCard">
+            <div className="panelHeader">
+              <h2>Quick stash</h2>
+              <p>Paste a link, text, or anything to stash.</p>
             </div>
-          )}
-          <div className="keyHint">Ctrl/Cmd + Enter to stash</div>
-          {linksFound > 0 && (
-            <div className="extractCount">
-              {linksFound} link{linksFound === 1 ? "" : "s"} ready to stash
-            </div>
-          )}
 
-          <div className="optionsRow">
-            <div className="optionsLabel">Preferences</div>
-            <div className="optionsActions">
-              <button type="button" className="miniBtn subtle" onClick={pasteFromClipboard}>
-                From Clipboard
-              </button>
-              <label className="miniToggle">
-                <span>Auto-open</span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    checked={autoRedirect}
-                    onChange={() => setAutoRedirect(!autoRedirect)}
-                  />
-                  <span className="slider" />
-                </span>
-              </label>
-            </div>
-          </div>
+            <textarea
+              ref={textareaRef}
+              className="input textarea dropzone homeTextarea"
+              placeholder="Paste a link, text, or anything you want to stash..."
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  extractLinks();
+                }
+              }}
+            />
 
-          {/* SINGLE RESULT (existing UI) */}
-          {link && (
-            <div className="result result--stack">
+            <div className="homeHintRow">
+              <div className="hint">Tip: paste multiple links at once.</div>
+              <div className="keyHint">Ctrl/Cmd + Enter</div>
+            </div>
+
+            {!link && bulkLinks.length === 0 && (
+              <div className="primaryRow">
+                <button className="primary-btn homePrimaryBtn" onClick={extractLinks}>
+                  Stash
+                </button>
+              </div>
+            )}
+
+            {linksFound > 0 && (
+              <div className="extractCount">
+                {linksFound} link{linksFound === 1 ? "" : "s"} ready to stash
+              </div>
+            )}
+
+            <div className="homePrefs">
+              <div className="optionsLabel">Preferences</div>
+              <div className="optionsActions">
+                <button type="button" className="miniBtn subtle" onClick={pasteFromClipboard}>
+                  From Clipboard
+                </button>
+                <label className="miniToggle">
+                  <span>Auto-open</span>
+                  <span className="switch">
+                    <input
+                      type="checkbox"
+                      checked={autoRedirect}
+                      onChange={() => setAutoRedirect(!autoRedirect)}
+                    />
+                    <span className="slider" />
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {hasAttempted && !link && bulkLinks.length === 0 && (
+              <div className="actions single">
+                <div className="emptyNote">Nothing to stash yet.</div>
+                <button className="secondary-btn" onClick={resetAll}>
+                  Clear
+                </button>
+              </div>
+            )}
+
+            {error && <p className="error">✕ {error}</p>}
+            {warning && !error && <p className="warning">{warning}</p>}
+          </section>
+
+          <section className="panel p-5 homeCard">
+            <div className="panelHeader">
+              <h2>Preview</h2>
+              <p>Extracted items ready to stash.</p>
+            </div>
+
+            {!link && bulkLinks.length === 0 && (
+              <div className="homeEmptyState">Paste something to see what will be saved.</div>
+            )}
+
+            {link && (
               <div className="previewPanel">
                 <div className="previewHeader">
                   <div className="previewTitleRow">
                     <p className="previewTitle">Ready to stash</p>
-                    <span className="previewStatus">Cleaned</span>
                   </div>
                   <button className="tertiary-btn" onClick={resetAll}>
                     Clear
                   </button>
                 </div>
                 {linkMeta?.domain && <span className="domainPill">{linkMeta.domain}</span>}
-                <div className="urlPreview">{link}</div>
-                <div className="previewActions">
-                  <button className="primary-btn btnCompact" onClick={copyToClipboard}>
-                    {copied ? "Copied" : "Copy"}
-                  </button>
-                  <button
-                    className="secondary-btn btnCompact"
-                    onClick={() => window.open(link, "_blank")}
-                  >
-                    Open
-                  </button>
-                </div>
+                <a className="urlPreview urlPreviewLink" href={link} target="_blank" rel="noreferrer">
+                  {link}
+                </a>
               </div>
+            )}
 
-              <div className="savePanel">
-                <div className="saveRowInline">
-                  <span className="saveLabel">Stash in</span>
-                  <select
-                    className="select"
-                    value={selectedTripId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setSelectedTripId(nextId);
-                    }}
-                  >
-                    <option value="">Choose a stash</option>
-                    {tripsForSelect.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.items.length})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="primary-btn btnCompact"
-                    onClick={() => {
-                      setLastSavedTripId(selectedTripId);
-                      saveSingleToTrip();
-                    }}
-                    disabled={!selectedTripId}
-                  >
-                    Stash
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  className="miniBtn subtle newStashToggle"
-                  onClick={() => setShowNewStash((prev) => !prev)}
-                >
-                  {showNewStash ? "Hide new stash" : "+ New stash"}
-                </button>
-
-                {showNewStash && (
-                  <form
-                    className="newStashForm"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      handleCreateTrip();
-                    }}
-                  >
-                    <input
-                      className="input small"
-                      placeholder="New stash name (e.g. Barcelona July)"
-                      value={newTripName}
-                      onChange={(e) => setNewTripName(e.target.value)}
-                    />
-                    <select
-                      className="select small"
-                      value={newTripType}
-                      onChange={(e) => setNewTripType(e.target.value)}
-                      aria-label="Stash type"
-                    >
-                      <option value="travel">Travel</option>
-                      <option value="fashion">Fashion</option>
-                      <option value="general">General</option>
-                    </select>
-                    <button className="secondary-btn btnCompact" type="submit">
-                      Create & stash
-                    </button>
-                  </form>
-                )}
-
-                {savedMsg && <div className="savedMsg">{savedMsg}</div>}
-              </div>
-            </div>
-          )}
-
-          {/* BULK RESULTS */}
-          {bulkLinks.length > 1 && (
-            <div className="result result--stack">
+            {bulkLinks.length > 1 && (
               <div className="previewPanel">
                 <div className="previewHeader">
                   <div>
@@ -747,34 +730,41 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+            )}
 
+            {(link || bulkLinks.length > 1) && (
               <div className="savePanel">
                 <div className="saveRowInline">
                   <span className="saveLabel">Stash in</span>
-                  <select
-                    className="select"
+                  <Dropdown
+                    className="stashDropdown"
                     value={selectedTripId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setSelectedTripId(nextId);
-                    }}
-                  >
-                    <option value="">Choose a stash</option>
-                    {tripsForSelect.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.items.length})
-                      </option>
-                    ))}
-                  </select>
-
+                    onChange={(nextId) => setSelectedTripId(nextId)}
+                    options={[
+                      { value: "", label: "Choose a stash" },
+                      ...tripsForSelect.map((t) => ({
+                        value: t.id,
+                        label: `${t.name} (${t.items.length})`,
+                      })),
+                    ]}
+                    ariaLabel="Choose a stash"
+                  />
                   <button
                     className="primary-btn btnCompact"
-                    onClick={() => saveBulkToTrip()}
+                    onClick={() => {
+                      if (link) {
+                        setLastSavedTripId(selectedTripId);
+                        saveSingleToTrip();
+                      } else {
+                        saveBulkToTrip();
+                      }
+                    }}
                     disabled={!selectedTripId}
                   >
                     Stash
                   </button>
                 </div>
+
                 <button
                   type="button"
                   className="miniBtn subtle newStashToggle"
@@ -803,9 +793,9 @@ export default function Home() {
                       onChange={(e) => setNewTripType(e.target.value)}
                       aria-label="Stash type"
                     >
+                      <option value="general">General</option>
                       <option value="travel">Travel</option>
                       <option value="fashion">Fashion</option>
-                      <option value="general">General</option>
                     </select>
                     <button className="secondary-btn btnCompact" type="submit">
                       Create & stash
@@ -815,22 +805,11 @@ export default function Home() {
 
                 {savedMsg && <div className="savedMsg">{savedMsg}</div>}
               </div>
-            </div>
-          )}
-
-          {hasAttempted && !link && bulkLinks.length === 0 && (
-            <div className="actions single">
-              <div className="emptyNote">Nothing to stash yet.</div>
-              <button className="secondary-btn" onClick={resetAll}>
-                Clear
-              </button>
-            </div>
-          )}
-
-          {error && <p className="error">✕ {error}</p>}
-          {warning && !error && <p className="warning">{warning}</p>}
+            )}
+          </section>
         </div>
-      </div>
+      </AppShell>
+
       {showAuthPrompt && !user && (
         <div
           className="authOverlay"

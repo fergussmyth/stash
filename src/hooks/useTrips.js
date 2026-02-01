@@ -4,6 +4,13 @@ import { useAuth } from "./useAuth";
 
 const STORAGE_KEY = "airbnb_trip_shortlists_v1";
 const TripsContext = createContext(null);
+const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
+
+function normalizeCategory(input = "") {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (CATEGORY_OPTIONS.includes(normalized)) return normalized;
+  return "general";
+}
 
 function makeShareId(length = 12) {
   const base =
@@ -123,6 +130,13 @@ export function TripsProvider({ children }) {
         title: item.title,
         note: item.note,
         sourceText: item.source_text,
+        openCount: item.open_count ?? 0,
+        lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
+        decisionGroupId: item.decision_group_id || null,
+        chosen: !!item.chosen,
+        primaryAction: item.primary_action || null,
+        shortlisted: !!item.shortlisted,
+        dismissed: !!item.dismissed,
         addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
       });
       itemsByTrip.set(item.trip_id, list);
@@ -131,10 +145,13 @@ export function TripsProvider({ children }) {
     const mapped = tripsData.map((t) => ({
       id: t.id,
       name: t.name,
-      type: t.type || "travel",
+      type: normalizeCategory(t.type),
       pinned: !!t.pinned,
       icon: t.icon || null,
       color: t.color || null,
+      coverImageUrl: t.cover_image_url || "",
+      coverImageSource: t.cover_image_source || "",
+      coverUpdatedAt: t.cover_updated_at || null,
       createdAt: t.created_at,
       items: itemsByTrip.get(t.id) || [],
       shareId: t.share_id || "",
@@ -156,7 +173,7 @@ export function TripsProvider({ children }) {
     const trimmed = (name || "").trim();
     if (!trimmed || !user) return null;
     const normalized = titleCase(trimmed);
-    const normalizedType = (type || "travel").trim() || "travel";
+    const normalizedType = normalizeCategory(type || "travel");
 
     const { data, error } = await supabase
       .from("trips")
@@ -173,16 +190,20 @@ export function TripsProvider({ children }) {
     const trip = {
       id: data.id,
       name: data.name,
-      type: data.type || "travel",
+      type: normalizeCategory(data.type),
       pinned: !!data.pinned,
       icon: data.icon || null,
       color: data.color || null,
+      coverImageUrl: data.cover_image_url || "",
+      coverImageSource: data.cover_image_source || "",
+      coverUpdatedAt: data.cover_updated_at || null,
       createdAt: data.created_at,
       items: [],
       shareId: data.share_id || "",
       isShared: !!data.is_shared,
     };
     setTrips((prev) => [trip, ...prev]);
+    void refreshTripCover(trip.id, { force: true });
     return trip.id;
   }
 
@@ -268,11 +289,148 @@ export function TripsProvider({ children }) {
       title: data.title,
       note: data.note,
       sourceText: data.source_text,
+      openCount: data.open_count ?? 0,
+      lastOpenedAt: data.last_opened_at ? new Date(data.last_opened_at).getTime() : 0,
+      decisionGroupId: data.decision_group_id || null,
+      chosen: !!data.chosen,
+      primaryAction: data.primary_action || null,
+      shortlisted: !!data.shortlisted,
+      dismissed: !!data.dismissed,
       addedAt: data.added_at ? new Date(data.added_at).getTime() : Date.now(),
     };
 
     setTrips((prev) =>
       prev.map((t) => (t.id === tripId ? { ...t, items: [mapped, ...t.items] } : t))
+    );
+
+    void refreshTripCover(tripId, { force: true });
+    void triggerDecisionUpdates(tripId);
+  }
+
+  async function refreshTripCover(tripId, { force = false } = {}) {
+    if (!user) return;
+    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
+    if (!supabaseUrl) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) return;
+
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/collection-cover`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ collectionId: tripId, force }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload?.coverImageUrl) return;
+      setTrips((prev) =>
+        prev.map((t) =>
+          t.id === tripId
+            ? {
+                ...t,
+                coverImageUrl: payload.coverImageUrl,
+                coverImageSource: payload.coverImageSource || t.coverImageSource,
+                coverUpdatedAt: payload.coverUpdatedAt || t.coverUpdatedAt,
+              }
+            : t
+        )
+      );
+    } catch {
+      // ignore cover refresh failures
+    }
+  }
+
+  async function reloadTripItems(tripId) {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("trip_items")
+      .select("*")
+      .eq("trip_id", tripId)
+      .order("added_at", { ascending: false });
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to reload items:", error.message);
+      return;
+    }
+    const nextItems = (data || []).map((item) => ({
+      id: item.id,
+      url: item.url,
+      airbnbUrl: item.url,
+      originalUrl: item.original_url,
+      domain: item.domain,
+      platform: item.platform,
+      itemType: item.item_type,
+      imageUrl: item.image_url,
+      faviconUrl: item.favicon_url,
+      metadata: item.metadata || {},
+      pinned: !!item.pinned,
+      archived: !!item.archived,
+      title: item.title,
+      note: item.note,
+      sourceText: item.source_text,
+      openCount: item.open_count ?? 0,
+      lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
+      decisionGroupId: item.decision_group_id || null,
+      chosen: !!item.chosen,
+      primaryAction: item.primary_action || null,
+      shortlisted: !!item.shortlisted,
+      dismissed: !!item.dismissed,
+      addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
+    }));
+
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, items: nextItems } : t))
+    );
+  }
+
+  async function triggerDecisionUpdates(tripId) {
+    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
+    if (!supabaseUrl) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) return;
+
+    const payload = JSON.stringify({ collectionId: tripId });
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    };
+
+    try {
+      await Promise.all([
+        fetch(`${supabaseUrl}/functions/v1/recompute-decision-groups`, {
+          method: "POST",
+          headers,
+          body: payload,
+        }),
+        fetch(`${supabaseUrl}/functions/v1/infer-primary-action`, {
+          method: "POST",
+          headers,
+          body: payload,
+        }),
+      ]);
+      await reloadTripItems(tripId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Decision updates failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  function updateItemEngagement(tripId, itemId, updates) {
+    setTrips((prev) =>
+      prev.map((t) => {
+        if (t.id !== tripId) return t;
+        return {
+          ...t,
+          items: t.items.map((item) =>
+            item.id === itemId ? { ...item, ...updates } : item
+          ),
+        };
+      })
     );
   }
 
@@ -466,10 +624,12 @@ export function TripsProvider({ children }) {
     removeItem,
     updateItemNote,
     updateItemTitle,
+    updateItemEngagement,
     enableShare,
     disableShare,
     toggleTripPinned,
     toggleItemPinned,
+    reloadTripItems,
     localImportAvailable,
     importLocalTrips,
   };

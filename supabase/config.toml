@@ -6,3 +6,30 @@ verify_jwt = false
 
 [functions.extension-save]
 verify_jwt = false
+
+[functions.link-open]
+verify_jwt = false
+
+[functions.recompute-decision-groups]
+verify_jwt = false
+
+[functions.infer-primary-action]
+verify_jwt = false
+
+[functions.link-set-flags]
+verify_jwt = false
+
+[functions.decision-group-resolve]
+verify_jwt = false
+
+[functions.mark-chosen]
+verify_jwt = false
+
+[functions.archive-decision-group-others]
+verify_jwt = false
+
+[functions.track-event]
+verify_jwt = false
+
+[functions.collection-cover]
+verify_jwt = false

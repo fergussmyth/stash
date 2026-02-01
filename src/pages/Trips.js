@@ -1,10 +1,30 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
 import { LoginForm } from "./Login";
+import Dropdown from "../components/Dropdown";
 import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
+import stashLogo from "../assets/icons/stash-favicon.png";
+import userIcon from "../assets/icons/user.png";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AppShell from "../components/AppShell";
+import SidebarNav from "../components/SidebarNav";
+import TopBar from "../components/TopBar";
+import CollectionCard from "../components/CollectionCard";
+
+const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
+const CATEGORY_LABELS = {
+  general: "General",
+  travel: "Travel",
+  fashion: "Fashion",
+};
+
+function normalizeCategory(input = "") {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (CATEGORY_OPTIONS.includes(normalized)) return normalized;
+  return "general";
+}
 
 function IconExternal(props) {
   return (
@@ -51,57 +71,6 @@ function IconTrash(props) {
   );
 }
 
-function cleanAirbnbUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return url;
-  }
-}
-
-function extractRoomIdFromUrl(url) {
-  const cleaned = cleanAirbnbUrl(url);
-  const match = cleaned.match(/\/rooms\/(\d+)/i);
-  return match ? match[1] : null;
-}
-
-function decodeHtmlEntities(text = "") {
-  if (!text) return "";
-  if (typeof document === "undefined") return text;
-  const el = document.createElement("textarea");
-  el.innerHTML = text;
-  return el.value;
-}
-
-function humanizeSlugTitle(pathname = "", hostname = "") {
-  const cleanPath = (pathname || "").replace(/\/+$/, "");
-  if (!cleanPath || cleanPath === "/") return hostname.replace(/^www\./, "");
-  const parts = cleanPath.split("/").filter(Boolean);
-  let slug = parts[parts.length - 1] || "";
-  const prdIndex = parts.findIndex((p) => p.toLowerCase() === "prd");
-  if (prdIndex > 0) {
-    slug = parts[prdIndex - 1] || slug;
-  }
-  if (/^\d+$/.test(slug)) return hostname.replace(/^www\./, "");
-  const words = slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!words) return hostname.replace(/^www\./, "");
-  return words.replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function fallbackTitleForUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("airbnb.")) {
-      const roomId = extractRoomIdFromUrl(url);
-      return roomId ? `Airbnb room ${roomId}` : "Airbnb room";
-    }
-    return humanizeSlugTitle(parsed.pathname, parsed.hostname);
-  } catch {
-    return "Saved link";
-  }
-}
-
 function formatLastUpdated(trip) {
   const itemTimes = (trip.items || [])
     .map((item) => item.addedAt || 0)
@@ -129,15 +98,64 @@ export default function Trips() {
     importLocalTrips,
   } = useTrips();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [menuOpenId, setMenuOpenId] = useState("");
   const [shareTrip, setShareTrip] = useState(null);
   const [shareMsg, setShareMsg] = useState("");
   const [sortMode, setSortMode] = useState("updated");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingTripId, setEditingTripId] = useState("");
   const [editingTripName, setEditingTripName] = useState("");
   const [toastMsg, setToastMsg] = useState("");
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
   const shareBase = rawShareBase.replace(/\/+$/, "");
+  const rawCategory = searchParams.get("category");
+  const activeCategory = normalizeCategory(rawCategory);
+  const activeCategoryLabel = CATEGORY_LABELS[activeCategory];
+  const categoryTrips = useMemo(
+    () => trips.filter((trip) => normalizeCategory(trip.type) === activeCategory),
+    [trips, activeCategory]
+  );
+  const filteredTrips = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return categoryTrips;
+    return categoryTrips.filter((trip) => (trip.name || "").toLowerCase().includes(query));
+  }, [categoryTrips, searchQuery]);
+  const categoryCounts = useMemo(
+    () =>
+      CATEGORY_OPTIONS.reduce((acc, category) => {
+        acc[category] = trips.filter((trip) => normalizeCategory(trip.type) === category).length;
+        return acc;
+      }, {}),
+    [trips]
+  );
+  const collectionsCount = user ? categoryTrips.length : 0;
+  const sortedTrips = useMemo(
+    () =>
+      filteredTrips.slice().sort((a, b) => {
+        const aPinned = !!a.pinned;
+        const bPinned = !!b.pinned;
+        if (aPinned !== bPinned) return aPinned ? -1 : 1;
+        if (sortMode === "name") {
+          return (a.name || "").localeCompare(b.name || "");
+        }
+        if (sortMode === "count") {
+          return (b.items?.length || 0) - (a.items?.length || 0);
+        }
+        const aTime = getLastUpdatedTime(a);
+        const bTime = getLastUpdatedTime(b);
+        return bTime - aTime;
+      }),
+    [filteredTrips, sortMode]
+  );
+  const nameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (rawCategory !== activeCategory) {
+      setSearchParams({ category: activeCategory }, { replace: true });
+    }
+  }, [rawCategory, activeCategory, setSearchParams]);
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -231,279 +249,244 @@ export default function Trips() {
   }
 
   return (
-    <div className="page tripsPage">
-      <div className="card glow tripsCard">
-        <h1>
-          Your <span>Collections</span>
-        </h1>
-
-        <div className="content">
-          {toastMsg && <div className="toast">{toastMsg}</div>}
-          {!user && (
-            <>
-              <div className="muted">
-                Sign in to create and sync collections across devices.
-              </div>
-              <LoginForm />
-            </>
-          )}
-
-          {user && localImportAvailable && (
-            <div className="importBox">
-              <div className="importText">Local collections found on this device.</div>
-              <button className="miniBtn" type="button" onClick={importLocalTrips}>
-                Import local collections to cloud
-              </button>
-            </div>
-          )}
-
-          {user && (
-            <div className="tripCreate">
-              <TripCreate createTrip={createTrip} />
-            </div>
-          )}
-
-          {user && (
-            <div className="tripHeaderRow">
-              <div className="sortRow inline">
-                <label className="sortLabel" htmlFor="sortTrips">
-                  Sort
-                </label>
-                <select
-                  id="sortTrips"
-                  className="select sortSelect"
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value)}
-                >
-                  <option value="updated">Last updated</option>
-                  <option value="name">Name (A–Z)</option>
-                  <option value="count">Link count</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div className="tripList">
-            {loading ? (
-              <div className="tripSkeletonGrid">
-                {Array.from({ length: 3 }).map((_, index) => (
-                  <div key={index} className="tripSkeleton" />
-                ))}
-              </div>
-            ) : user && trips.length === 0 ? (
-              <div className="tripEmpty">
-                <div className="tripEmptyTitle">No collections yet</div>
-                <div className="tripEmptyText">Create one to start saving your favorite links.</div>
-                <Link className="miniBtn linkBtn" to="/">
-                  Go to Stash
+    <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <AppShell
+        sidebar={
+          <SidebarNav
+            brandIcon={
+              <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+            }
+            activeSection={activeCategory}
+            categoryCounts={categoryCounts}
+            onSelectSection={(category) => {
+              setSearchParams({ category });
+              setSidebarOpen(false);
+            }}
+            onNavigate={() => setSidebarOpen(false)}
+          />
+        }
+        topbar={
+          <TopBar
+            title="Collections"
+            subtitle="Organize links into themed lists."
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            actions={
+              <>
+                <Link className="topbarPill" to="/trips">
+                  Stashes
                 </Link>
+                <Link className="topbarPill" to="/review">
+                  Review
+                </Link>
+                {user ? (
+                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
+                  </Link>
+                ) : (
+                  <Link className="topbarPill subtle" to="/login">
+                    Sign in
+                  </Link>
+                )}
+              </>
+            }
+          />
+        }
+        isSidebarOpen={sidebarOpen}
+        onCloseSidebar={() => setSidebarOpen(false)}
+      >
+        {toastMsg && <div className="toast">{toastMsg}</div>}
+
+        <div className="collectionsSplit">
+          <section className="panel p-5 collectionsPanel createPanel">
+            <div className="panelContent">
+              <div className="panelHeader">
+                <h2>Create collection</h2>
+                <p>Start a new list for saved links.</p>
               </div>
-            ) : (
-              trips
-                .slice()
-                .sort((a, b) => {
-                  const aPinned = !!a.pinned;
-                  const bPinned = !!b.pinned;
-                  if (aPinned !== bPinned) return aPinned ? -1 : 1;
-                  if (sortMode === "name") {
-                    return (a.name || "").localeCompare(b.name || "");
-                  }
-                  if (sortMode === "count") {
-                    return (b.items?.length || 0) - (a.items?.length || 0);
-                  }
-                  const aTime = getLastUpdatedTime(a);
-                  const bTime = getLastUpdatedTime(b);
-                  return bTime - aTime;
-                })
-                .map((t) => (
-                <div
-                  key={t.id}
-                  className={`tripCard ${t.pinned ? "pinned" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    if (editingTripId === t.id) return;
-                    navigate(`/trips/${t.id}`);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      if (editingTripId === t.id) return;
-                      navigate(`/trips/${t.id}`);
-                    }
-                  }}
-                >
-                  <div className="tripHeader">
-                    {editingTripId === t.id ? (
-                      <div className="tripRenameRow">
-                        <input
-                          className="input tripRenameInput"
-                          value={editingTripName}
-                          onChange={(e) => setEditingTripName(e.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleRenameTrip(t);
-                            }
-                            if (event.key === "Escape") {
-                              setEditingTripId("");
-                              setEditingTripName("");
-                            }
-                          }}
-                        />
-                        <div className="tripRenameActions">
-                          <button
-                            className="miniBtn"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleRenameTrip(t);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="miniBtn"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEditingTripId("");
-                              setEditingTripName("");
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
+
+              {!user && (
+                <>
+                  <div className="muted">
+                    Sign in to create and sync collections across devices.
+                  </div>
+                  <LoginForm />
+                </>
+              )}
+
+              {user && (
+                <TripCreate
+                  createTrip={createTrip}
+                  inputRef={nameInputRef}
+                  activeCategory={activeCategory}
+                />
+              )}
+
+              {user && localImportAvailable && (
+                <div className="importBox">
+                  <div className="importText">Local collections found on this device.</div>
+                  <button className="miniBtn" type="button" onClick={importLocalTrips}>
+                    Import local collections to cloud
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="panel p-5 collectionsPanel listPanel">
+            <div className="panelContent">
+              <div className="listHeaderRow">
+                <div className="listTitleRow">
+                  <div className="listTitle">Your collections</div>
+                  {user && (
+                    <span
+                      className="listCountBadge"
+                      aria-label={`${collectionsCount} collections`}
+                    >
+                      {collectionsCount}
+                    </span>
+                  )}
+                </div>
+                {user && filteredTrips.length > 0 && (
+                  <div className="sortRow inline">
+                    <label className="sortLabel" htmlFor="sortTrips">
+                      Sort
+                    </label>
+                    <Dropdown
+                      id="sortTrips"
+                      className="sortDropdown"
+                      value={sortMode}
+                      onChange={setSortMode}
+                      options={[
+                        { value: "updated", label: "Last updated" },
+                        { value: "name", label: "Name (A–Z)" },
+                        { value: "count", label: "Link count" },
+                      ]}
+                      ariaLabel="Sort collections"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={`tripList ${user && categoryTrips.length === 0 ? "isEmpty" : ""}`}
+              >
+                {loading ? (
+                  <div className="tripSkeletonGrid">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <div key={index} className="tripSkeleton" />
+                    ))}
+                  </div>
+                ) : user && categoryTrips.length === 0 ? (
+                  <div className="collectionsEmpty">
+                    <div className="collectionsEmptyIcon" aria-hidden="true">
+                      +
+                    </div>
+                    <div className="collectionsEmptyTitle">
+                      No {activeCategoryLabel} collections yet
+                    </div>
+                    <div className="collectionsEmptyText">
+                      Create one to start saving links.
+                    </div>
+                    <button
+                      className="primary-btn collectionsEmptyBtn"
+                      type="button"
+                      onClick={() => {
+                        nameInputRef.current?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
+                        nameInputRef.current?.focus();
+                      }}
+                    >
+                      Create a {activeCategoryLabel} collection
+                    </button>
+                  </div>
+                ) : user && filteredTrips.length === 0 ? (
+                  <div className="tripEmptyState">
+                    <div className="tripEmptyCallout">
+                      <div className="tripEmptyIcon static" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <circle
+                            cx="11"
+                            cy="11"
+                            r="7"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          />
+                          <path
+                            d="M20 20l-3.5-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
                       </div>
-                    ) : (
-                      <div className="tripName">{t.name}</div>
-                    )}
-                    <div className="tripMetaLine">
-                      {t.items.length} link{t.items.length === 1 ? "" : "s"} • last updated{" "}
-                      {formatLastUpdated(t)}
-                    </div>
-                    {t.pinned && (
-                      <button
-                        className="tripPinBtn"
-                        type="button"
-                        aria-label="Unpin collection"
-                        title="Unpin collection"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(t);
-                        }}
-                      >
-                        <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
-                      </button>
-                    )}
-                    <div className="tripMenuWrap" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="tripMenuBtn"
-                        type="button"
-                        aria-label="Collection options"
-                        onClick={() => setMenuOpenId((prev) => (prev === t.id ? "" : t.id))}
-                      >
-                        ⋯
-                      </button>
-                      {menuOpenId === t.id && (
-                        <div className="tripMenu" role="menu">
-                          <button
-                            className="tripMenuItem"
-                            type="button"
-                            onClick={() => openShare(t)}
-                          >
-                            Share
-                          </button>
-                          <button
-                            className="tripMenuItem"
-                            type="button"
-                            onClick={() => togglePin(t)}
-                          >
-                            {t.pinned ? "Unpin" : "Pin"}
-                          </button>
-                          <button
-                            className="tripMenuItem danger"
-                            type="button"
-                            onClick={() => {
-                              setMenuOpenId("");
-                              deleteTrip(t.id);
-                              setToastMsg("Deleted");
-                              setTimeout(() => setToastMsg(""), 1500);
-                            }}
-                          >
-                            Delete
-                          </button>
+                      <div className="tripEmptyCopy">
+                        <div className="tripEmptyTitle">No matches</div>
+                        <div className="tripEmptyText">
+                          Try a shorter keyword or clear the search.
                         </div>
-                      )}
+                        <button
+                          className="tripEmptyLink"
+                          type="button"
+                          onClick={() => setSearchQuery("")}
+                        >
+                          Clear search
+                        </button>
+                      </div>
                     </div>
-                    <div className="tripQuickActions" role="group" aria-label="Quick actions">
-                      <button
-                        className="iconBtn bare quickActionBtn"
-                        type="button"
-                        aria-label="Open collection"
-                        title="Open"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigate(`/trips/${t.id}`);
+                  </div>
+                ) : (
+                  <div className="collectionsGrid">
+                    {sortedTrips.map((trip) => (
+                      <CollectionCard
+                        key={trip.id}
+                        trip={trip}
+                        coverImageUrl={trip.coverImageUrl}
+                        coverImageSource={trip.coverImageSource}
+                        isEditing={editingTripId === trip.id}
+                        editingName={editingTripName}
+                        onEditingNameChange={setEditingTripName}
+                        onRenameSave={() => handleRenameTrip(trip)}
+                        onRenameCancel={() => {
+                          setEditingTripId("");
+                          setEditingTripName("");
                         }}
-                      >
-                        <IconExternal className="quickActionIcon" />
-                      </button>
-                      <button
-                        className="iconBtn bare quickActionBtn"
-                        type="button"
-                        aria-label="Rename collection"
-                        title="Rename"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setEditingTripId(t.id);
-                          setEditingTripName(t.name || "");
-                        }}
-                      >
-                        <IconEdit className="quickActionIcon" />
-                      </button>
-                      <button
-                        className="iconBtn bare quickActionBtn danger"
-                        type="button"
-                        aria-label="Delete collection"
-                        title="Delete"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteTrip(t.id);
+                        menuOpen={menuOpenId === trip.id}
+                        onToggleMenu={() =>
+                          setMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
+                        }
+                        onShare={() => openShare(trip)}
+                        onTogglePin={() => togglePin(trip)}
+                        onDelete={() => {
+                          setMenuOpenId("");
+                          deleteTrip(trip.id);
                           setToastMsg("Deleted");
                           setTimeout(() => setToastMsg(""), 1500);
                         }}
-                      >
-                        <IconTrash className="quickActionIcon" />
-                      </button>
-                    </div>
+                        onOpen={() => navigate(`/trips/${trip.id}`)}
+                        onStartRename={() => {
+                          setEditingTripId(trip.id);
+                          setEditingTripName(trip.name || "");
+                        }}
+                        formatLastUpdated={formatLastUpdated}
+                        IconExternal={IconExternal}
+                        IconEdit={IconEdit}
+                        IconTrash={IconTrash}
+                        pinIcon={pinIcon}
+                      />
+                    ))}
                   </div>
-
-                  {t.items.length > 0 && (
-                    <div className="tripItemsPreview">
-                      {t.items.slice(0, 3).map((item) => (
-                        <div key={item.id} className="tripItemPreview">
-                          {decodeHtmlEntities((item.title || "").trim()) || fallbackTitleForUrl(item.airbnbUrl)}
-                        </div>
-                      ))}
-                      {t.items.length > 3 && (
-                        <span className="tripItemMore">+{t.items.length - 3} more</span>
-                      )}
-                    </div>
-                  )}
-
-                </div>
-                ))
-            )}
-          </div>
-
-          <div className="navRow">
-            <Link className="miniBtn linkBtn" to="/">
-              ← Back to Stash
-            </Link>
-          </div>
+                )}
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
+      </AppShell>
       {shareTrip && (
         <div
           className="shareOverlay"
@@ -559,47 +542,86 @@ export default function Trips() {
   );
 }
 
-function TripCreate({ createTrip, disabled }) {
+function TripCreate({ createTrip, disabled, inputRef, activeCategory }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState("travel");
+  const [type, setType] = useState(activeCategory);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const trimmed = name.trim();
+  const canCreate = trimmed.length > 0;
+  const showError = touched && !canCreate;
+
+  useEffect(() => {
+    setType(activeCategory);
+  }, [activeCategory]);
 
   async function handleCreate() {
-    const id = await createTrip(name, type);
+    if (!canCreate || disabled || isSubmitting) {
+      setTouched(true);
+      return;
+    }
+    setIsSubmitting(true);
+    const id = await createTrip(trimmed, type);
+    setIsSubmitting(false);
     if (!id) return;
     setName("");
-    setType("travel");
+    setType(activeCategory);
+    setTouched(false);
   }
 
   return (
     <form
-      className="createTripRow"
+      className="createTripForm"
       onSubmit={(event) => {
         event.preventDefault();
-        if (disabled) return;
         handleCreate();
       }}
     >
-      <input
-        className="input"
-        placeholder="New collection name (e.g. Paris weekend)"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        disabled={disabled}
-      />
-      <select
-        className="select small"
-        value={type}
-        onChange={(e) => setType(e.target.value)}
-        disabled={disabled}
-        aria-label="Collection type"
-      >
-        <option value="travel">Travel</option>
-        <option value="fashion">Fashion</option>
-        <option value="general">General</option>
-      </select>
-      <button className="secondary-btn" type="submit" disabled={disabled}>
-        Create
-      </button>
+      <div className="fieldGroup">
+        <label className="fieldLabel" htmlFor="collectionName">
+          Collection name
+        </label>
+        <input
+          id="collectionName"
+          className="input"
+          placeholder="Name your collection"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => setTouched(true)}
+          aria-invalid={showError}
+          disabled={disabled || isSubmitting}
+          ref={inputRef}
+        />
+        <div className="fieldHelp">
+          e.g. Gym prep, React refs, Trip ideas
+        </div>
+        {showError && <div className="fieldError">Name is required.</div>}
+      </div>
+      <div className="createTripRow">
+        <div className="fieldGroup">
+          <label className="fieldLabel" htmlFor="collectionCategory">
+            Category
+          </label>
+          <select
+            id="collectionCategory"
+            className="select"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            disabled={disabled || isSubmitting}
+          >
+            <option value="general">General</option>
+            <option value="travel">Travel</option>
+            <option value="fashion">Fashion</option>
+          </select>
+        </div>
+        <button
+          className="primary-btn createTripBtn"
+          type="submit"
+          disabled={!canCreate || disabled || isSubmitting}
+        >
+          {isSubmitting ? "Creating..." : "Create collection"}
+        </button>
+      </div>
     </form>
   );
 }

@@ -1,6 +1,7 @@
-import { Link, useParams } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
+import { supabase } from "../lib/supabaseClient";
 import shareIcon from "../assets/icons/share.png";
 import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
@@ -255,13 +256,101 @@ function buildMetadataChips(metadata = {}) {
   return chips;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STALE_MS = 30 * DAY_MS;
+
+function normalizePrimaryAction(value) {
+  const action = (value || "").toLowerCase();
+  if (action === "buy" || action === "watch" || action === "reference" || action === "book")
+    return action;
+  return "read";
+}
+
+function primaryActionLabel(action) {
+  if (action === "buy") return "Buy";
+  if (action === "book") return "Book";
+  if (action === "watch") return "Watch";
+  if (action === "reference") return "Open";
+  return "Read";
+}
+
+function makeCoverGradient(seed) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const colors = ["#0f172a", "#1e293b", "#0b3b5e", "#1f2a44", "#2b3655", "#0f3d3e"];
+  const pick = (offset) => colors[Math.abs(hash + offset) % colors.length];
+  return `linear-gradient(135deg, ${pick(0)} 0%, ${pick(2)} 50%, ${pick(4)} 100%)`;
+}
+
+function formatCollectionUpdatedAt(trip) {
+  const itemTimes = (trip?.items || [])
+    .map((item) => item.addedAt || 0)
+    .filter(Boolean);
+  const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip?.createdAt || "");
+  if (!latest) return "recently";
+  return new Date(latest).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function CollectionCoverHeader({ trip, onShare, showShare }) {
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  const coverSeed = useMemo(() => `${trip?.id || ""}-${trip?.name || ""}`, [trip?.id, trip?.name]);
+  const fallbackGradient = useMemo(() => makeCoverGradient(coverSeed), [coverSeed]);
+  const coverImageUrl = trip?.coverImageUrl || "";
+  const isGradientCover =
+    (trip?.coverImageSource || "") === "gradient" ||
+    coverImageUrl.startsWith("linear-gradient") ||
+    coverImageUrl.startsWith("radial-gradient");
+  const isImageCover = !!coverImageUrl && !isGradientCover;
+  const coverBackground = isGradientCover && coverImageUrl ? coverImageUrl : fallbackGradient;
+
+  return (
+    <div
+      className={`detailCoverMedia ${coverLoaded ? "isLoaded" : ""}`}
+      style={{ backgroundImage: coverBackground }}
+    >
+      {isImageCover && (
+        <img
+          className="detailCoverImage"
+          src={coverImageUrl}
+          alt=""
+          loading="lazy"
+          onLoad={() => setCoverLoaded(true)}
+          onError={() => setCoverLoaded(true)}
+        />
+      )}
+      <div className="detailCoverOverlay" aria-hidden="true" />
+      <div className="detailCoverActions">
+        {showShare && (
+          <button
+            className="coverActionBtn"
+            type="button"
+            onClick={onShare}
+            aria-label="Share collection"
+          >
+            <img className="iconImg" src={shareIcon} alt="" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TripDetail() {
   const { id } = useParams();
+  const location = useLocation();
   const {
     tripsById,
     removeItem,
     updateItemNote,
     updateItemTitle,
+    updateItemEngagement,
     enableShare,
     toggleItemPinned,
     user,
@@ -294,9 +383,26 @@ export default function TripDetail() {
   const [expandedNotes, setExpandedNotes] = useState(new Set());
   const [collapsedDomains, setCollapsedDomains] = useState({});
   const [inlineError, setInlineError] = useState("");
+  const [inlineToast, setInlineToast] = useState("");
+  const [showAllComparisons, setShowAllComparisons] = useState(false);
+  const [highlightGroupId, setHighlightGroupId] = useState("");
+  const [reviewOnlyGroupIds, setReviewOnlyGroupIds] = useState(new Set());
+  const [candidateByGroup, setCandidateByGroup] = useState({});
+  const [bannerDismissedGroupIds, setBannerDismissedGroupIds] = useState(new Set());
+  const [showComparisonExplainer, setShowComparisonExplainer] = useState(false);
+  const [focusGroupId, setFocusGroupId] = useState("");
+  const comparisonTrackedRef = useRef({ shown: false, explainer: false });
 
   const trip = tripsById.get(id);
   const collectionLabel = getCollectionLabel(trip?.type);
+  const collectionSubtitle =
+    collectionLabel === "Shortlist"
+      ? "Travel shortlist"
+      : collectionLabel === "Fashion list"
+        ? "Fashion list"
+        : "Collection";
+  const updatedAt = formatCollectionUpdatedAt(trip);
+  const linkCount = trip?.items?.length || 0;
   const collectionShareLabel = getCollectionShareLabel(trip?.type);
   const hasItems = trip?.items?.length > 0;
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
@@ -329,6 +435,19 @@ export default function TripDetail() {
     const storedCompact = window.localStorage.getItem("collectionCompactMode");
     setCompactMode(storedCompact === "1");
   }, [id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(location.search);
+    const focusGroup = params.get("focusGroup");
+    if (!focusGroup) return;
+    setFocusGroupId(focusGroup);
+    const target = document.getElementById(`decision-group-${focusGroup}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHighlightGroupId(focusGroup);
+    setTimeout(() => setHighlightGroupId(""), 1500);
+  }, [location.search]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -370,11 +489,15 @@ export default function TripDetail() {
       const target = event.target;
       if (target && target.closest(".itemMenuWrap")) return;
       setItemMenuOpenId("");
+      if (target && (target.closest(".note") || target.closest(".noteToggle"))) return;
+      if (expandedNotes.size > 0) {
+        setExpandedNotes(new Set());
+      }
     }
 
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
-  }, []);
+  }, [expandedNotes.size]);
 
   useEffect(() => {
     const enableCompare = viewMode === "compare";
@@ -471,6 +594,12 @@ export default function TripDetail() {
 
   const filteredItems = filteredState.items;
   const duplicateCount = filteredState.duplicateCount;
+  const focusItems = useMemo(() => {
+    if (!focusGroupId || !trip?.items) return [];
+    return trip.items.filter(
+      (item) => item.decisionGroupId === focusGroupId && !item.dismissed
+    );
+  }, [focusGroupId, trip]);
 
   const compareItems = useMemo(() => {
     if (!filteredItems.length || compareSelected.size === 0) return [];
@@ -493,6 +622,64 @@ export default function TripDetail() {
     return groups;
   }, [filteredItems, groupByDomain]);
 
+  const decisionGroups = useMemo(() => {
+    if (!trip?.items?.length) return [];
+    const map = new Map();
+    for (const item of trip.items) {
+      if (!item.decisionGroupId) continue;
+      if (!map.has(item.decisionGroupId)) {
+        map.set(item.decisionGroupId, { id: item.decisionGroupId, items: [] });
+      }
+      map.get(item.decisionGroupId).items.push(item);
+    }
+    const groups = Array.from(map.values()).filter((group) => {
+      const activeCount = group.items.filter((item) => !item.dismissed).length;
+      return activeCount >= 2 && activeCount <= 5;
+    });
+    groups.sort((a, b) => {
+      const aTime = Math.max(
+        ...a.items.map((item) => item.lastOpenedAt || item.addedAt || 0),
+        0
+      );
+      const bTime = Math.max(
+        ...b.items.map((item) => item.lastOpenedAt || item.addedAt || 0),
+        0
+      );
+      return bTime - aTime;
+    });
+    return groups;
+  }, [trip]);
+
+  const momentumGroups = useMemo(() => {
+    return decisionGroups.filter((group) => {
+      const activeItems = group.items.filter((item) => !item.dismissed);
+      if (activeItems.length < 2) return false;
+      return activeItems.some((item) => (item.openCount || 0) >= 2 || item.shortlisted);
+    });
+  }, [decisionGroups]);
+
+  const orderedDecisionGroups = useMemo(() => {
+    if (!decisionGroups.length) return [];
+    const momentumIds = new Set(momentumGroups.map((group) => group.id));
+    const nonMomentum = decisionGroups.filter((group) => !momentumIds.has(group.id));
+    return [...momentumGroups, ...nonMomentum];
+  }, [decisionGroups, momentumGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (momentumGroups.length === 0) return;
+    if (!comparisonTrackedRef.current.shown) {
+      comparisonTrackedRef.current.shown = true;
+      trackEvent("comparison_group_shown");
+    }
+    const seen = localStorage.getItem("stash_seen_comparison_explainer") === "true";
+    if (!seen && !comparisonTrackedRef.current.explainer) {
+      comparisonTrackedRef.current.explainer = true;
+      setShowComparisonExplainer(true);
+      trackEvent("comparison_explainer_shown");
+    }
+  }, [momentumGroups.length]);
+
   const hasActiveFilters =
     !!searchText.trim() ||
     !!tagFilter.trim() ||
@@ -500,6 +687,230 @@ export default function TripDetail() {
     !!domainInclude.trim() ||
     !!domainExclude.trim() ||
     fileType !== "all";
+  const visibleDecisionGroups = showAllComparisons
+    ? orderedDecisionGroups
+    : orderedDecisionGroups.slice(0, 2);
+  const hasHiddenDecisionGroups = orderedDecisionGroups.length > 2;
+
+  function isStaleItem(item) {
+    const now = Date.now();
+    const addedAt = item.addedAt || 0;
+    const lastOpenedAt = item.lastOpenedAt || 0;
+    if (lastOpenedAt > 0) {
+      return now - lastOpenedAt > STALE_MS;
+    }
+    if (addedAt > 0) {
+      return now - addedAt > STALE_MS;
+    }
+    return false;
+  }
+
+  async function getAccessToken() {
+    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
+    if (!supabaseUrl) return { supabaseUrl: "", accessToken: "" };
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token || "";
+    return { supabaseUrl, accessToken };
+  }
+
+  async function trackEvent(eventName, payload = {}) {
+    const { supabaseUrl, accessToken } = await getAccessToken();
+    if (!supabaseUrl || !accessToken) return;
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/track-event`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ event_name: eventName, payload }),
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  function markExplainerSeen() {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem("stash_seen_comparison_explainer") === "true") return;
+    localStorage.setItem("stash_seen_comparison_explainer", "true");
+    setShowComparisonExplainer(false);
+    trackEvent("comparison_explainer_dismissed");
+  }
+
+  async function resolveDecisionGroup(groupId) {
+    const { supabaseUrl, accessToken } = await getAccessToken();
+    if (!supabaseUrl || !accessToken || !trip?.id || !groupId) return;
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/decision-group-resolve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ collectionId: trip.id, decisionGroupId: groupId }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload?.status === "candidate_chosen") {
+        setCandidateByGroup((prev) => ({ ...prev, [groupId]: payload.linkId }));
+      } else if (payload?.status === "chosen") {
+        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
+        if (payload?.linkId) {
+          updateItemEngagement(trip.id, payload.linkId, { chosen: true });
+        }
+      } else {
+        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
+      }
+    } catch {
+      // ignore resolution failures
+    }
+  }
+
+  async function setLinkFlags(item, flags, groupId) {
+    const { supabaseUrl, accessToken } = await getAccessToken();
+    if (!supabaseUrl || !accessToken || !item?.id) return;
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/link-set-flags`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ linkId: item.id, ...flags }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload?.id) {
+        updateItemEngagement(trip.id, item.id, {
+          shortlisted: payload.shortlisted,
+          dismissed: payload.dismissed,
+          chosen: payload.chosen,
+        });
+      }
+      if (groupId) {
+        resolveDecisionGroup(groupId);
+      }
+    } catch {
+      // ignore flag failures
+    }
+  }
+
+  async function markChosen(linkId, groupId) {
+    const { supabaseUrl, accessToken } = await getAccessToken();
+    if (!supabaseUrl || !accessToken || !linkId) return;
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/mark-chosen`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ linkId }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload?.id) {
+        updateItemEngagement(trip.id, payload.id, { chosen: true });
+        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function archiveDecisionGroupOthers(groupId, chosenLinkId) {
+    const { supabaseUrl, accessToken } = await getAccessToken();
+    if (!supabaseUrl || !accessToken || !trip?.id) return;
+    try {
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/archive-decision-group-others`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            collectionId: trip.id,
+            decisionGroupId: groupId,
+            chosenLinkId,
+          }),
+        }
+      );
+      if (!response.ok) return;
+      updateItemEngagement(trip.id, chosenLinkId, { dismissed: false });
+      setInlineToastMessage("Archived the rest");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleOpenItem(item) {
+    if (!item?.airbnbUrl) return;
+    markExplainerSeen();
+    const { supabaseUrl, accessToken } = await getAccessToken();
+
+    if (supabaseUrl && accessToken && item.id) {
+      try {
+        const response = await fetch(`${supabaseUrl}/functions/v1/link-open`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ linkId: item.id }),
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          updateItemEngagement(trip.id, item.id, {
+            openCount:
+              payload?.open_count != null ? payload.open_count : (item.openCount || 0) + 1,
+            lastOpenedAt: payload?.last_opened_at
+              ? new Date(payload.last_opened_at).getTime()
+              : Date.now(),
+          });
+        } else {
+          updateItemEngagement(trip.id, item.id, {
+            openCount: (item.openCount || 0) + 1,
+            lastOpenedAt: Date.now(),
+          });
+        }
+      } catch {
+        updateItemEngagement(trip.id, item.id, {
+          openCount: (item.openCount || 0) + 1,
+          lastOpenedAt: Date.now(),
+        });
+      }
+    }
+
+    window.open(item.airbnbUrl, "_blank", "noopener,noreferrer");
+    trackEvent("link_opened", { linkId: item.id, collectionId: trip?.id });
+  }
+
+  function shouldShowNudge(group) {
+    const now = Date.now();
+    const hasRepeatOpens = group.items.some((item) => (item.openCount || 0) >= 2);
+    if (!hasRepeatOpens) return false;
+    const groupRecent = group.items.every((item) => {
+      if (!item.addedAt) return false;
+      return now - item.addedAt <= 30 * DAY_MS;
+    });
+    if (!groupRecent) return false;
+    const maxOpenedAt = Math.max(...group.items.map((item) => item.lastOpenedAt || 0), 0);
+    if (!maxOpenedAt) return false;
+    return now - maxOpenedAt > 7 * DAY_MS;
+  }
+
+  function handleReviewGroup(groupId) {
+    markExplainerSeen();
+    const target = document.getElementById(`decision-group-${groupId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHighlightGroupId(groupId);
+    setTimeout(() => setHighlightGroupId(""), 1500);
+  }
 
   function startEditTitle(item) {
     const parts = splitTitleParts(item.title, item.airbnbUrl);
@@ -548,6 +959,11 @@ export default function TripDetail() {
   function setInlineErrorMessage(message) {
     setInlineError(message);
     setTimeout(() => setInlineError(""), 2500);
+  }
+
+  function setInlineToastMessage(message) {
+    setInlineToast(message);
+    setTimeout(() => setInlineToast(""), 1500);
   }
 
   function toggleNoteExpanded(itemId, expanded) {
@@ -711,11 +1127,17 @@ export default function TripDetail() {
     const mentions = extractMentions(item.note || "");
     const isSelected = compareSelected.has(item.id);
     const disableSelect = compareSelected.size >= 4 && !isSelected;
+    const isStale = isStaleItem(item);
+    const action = normalizePrimaryAction(item.primaryAction);
+    const actionLabel = primaryActionLabel(action);
+    const isChosen = !!item.chosen;
 
     return (
       <div
         key={item.id}
-        className={`itemCard ${item.pinned ? "pinned" : ""} ${compactMode ? "compact" : ""}`}
+        className={`itemCard ${item.pinned ? "pinned" : ""} ${
+          compactMode ? "compact" : ""
+        } ${isStale ? "stale" : ""} ${itemMenuOpenId === item.id ? "menuOpen" : ""}`}
       >
         <div className="itemTop">
           {compareEnabled && (
@@ -749,15 +1171,15 @@ export default function TripDetail() {
               ) : (
                 <>
                   <div className="itemTitleRow">
-                    <a
+                    <button
                       className="itemTitleLink titleClampFade"
-                      href={item.airbnbUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      type="button"
+                      onClick={() => handleOpenItem(item)}
                       title={titleParts.main}
                     >
                       {titleParts.main}
-                    </a>
+                    </button>
+                    {isChosen && <span className="chosenPill">Chosen</span>}
                     {domainLabel && <span className="domainPill">{domainLabel}</span>}
                     {rating && <span className="ratingPill">⭐ {rating}</span>}
                   </div>
@@ -812,36 +1234,13 @@ export default function TripDetail() {
                   <img className="itemPinIcon" src={pinIcon} alt="" />
                 </span>
               )}
-              <div className="itemQuickActions" role="group" aria-label="Quick actions">
-                <a
-                  className="iconBtn bare quickActionBtn"
-                  href={item.airbnbUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Open link in new tab"
-                  title="Open in new tab"
-                >
-                  <IconExternal className="quickActionIcon" />
-                </a>
-                <button
-                  className="iconBtn bare quickActionBtn"
-                  type="button"
-                  onClick={() => handleCopyItemUrl(item)}
-                  aria-label="Copy link"
-                  title="Copy link"
-                >
-                  <IconCopy className="quickActionIcon" />
-                </button>
-                <button
-                  className="iconBtn bare quickActionBtn danger"
-                  type="button"
-                  onClick={() => handleRemoveItem(item.id)}
-                  aria-label="Remove from collection"
-                  title="Remove"
-                >
-                  <IconTrash className="quickActionIcon" />
-                </button>
-              </div>
+              <button
+                className={`primaryActionBtn ${isStale ? "stale" : ""}`}
+                type="button"
+                onClick={() => handleOpenItem(item)}
+              >
+                {actionLabel}
+              </button>
               {editingId === item.id ? (
                 <div className="itemSecondaryActions">
                   <button className="miniBtn" type="button" onClick={() => saveEditTitle(item)}>
@@ -876,7 +1275,10 @@ export default function TripDetail() {
                     <button
                       className="itemMenuItem"
                       type="button"
-                      onClick={() => toggleItemPinned(trip.id, item.id, !item.pinned)}
+                      onClick={() => {
+                        toggleItemPinned(trip.id, item.id, !item.pinned);
+                        setItemMenuOpenId("");
+                      }}
                     >
                       {item.pinned ? "Unpin" : "Pin"}
                     </button>
@@ -953,30 +1355,38 @@ export default function TripDetail() {
 
   return (
     <div className="page">
-      <div className="card glow">
-        <div className="detailHeader">
-          <div className="detailHeaderBar">
+      <div className="detailCollectionCard">
+        <CollectionCoverHeader
+          trip={trip}
+          onShare={handleToggleShare}
+          showShare={hasItems}
+        />
+
+        <div className="detailCollectionBody">
+          <div className={`detailHeader hasCover ${focusGroupId ? "focusOnly" : ""}`}>
+            <div className="detailHeaderBar">
             <Link className="miniBtn linkBtn" to="/trips">
               ← Collections
             </Link>
-            {hasItems && (
-              <button
-                className="iconBtn bare"
-                type="button"
-                onClick={handleToggleShare}
-                aria-label="Share collection"
-              >
-                <img className="iconImg" src={shareIcon} alt="" />
-              </button>
-            )}
-          </div>
+            </div>
 
-          <div className="detailHeaderTitle">
-            <h1 className="titleClamp">{trip.name}</h1>
-            <div className="detailSubtitle">{collectionLabel === "Shortlist" ? "Travel shortlist" : collectionLabel === "Fashion list" ? "Fashion list" : "Collection"}</div>
-          </div>
+            <div className="detailCoverBody">
+              <div className="detailCoverTitle">{trip?.name}</div>
+              <div className="detailCoverSubtitle">{collectionSubtitle}</div>
+              <div className="detailCoverMeta">
+                {linkCount} link{linkCount === 1 ? "" : "s"} · Updated {updatedAt} ·{" "}
+                {collectionSubtitle}
+              </div>
+              {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
+                <div className="sharedByLine">
+                  Shared by {formatSharedBy(trip.ownerDisplayName)}
+                </div>
+              )}
+            </div>
 
-          <div className="detailHeaderActions">
+            <div className="detailSectionDivider" />
+
+            <div className="detailHeaderActions">
             <div className="detailToolbar">
               <div className="toolbarLeft">
                 <div
@@ -1008,7 +1418,7 @@ export default function TripDetail() {
                   </button>
                 </div>
 
-                <div className="sortRow inline">
+                <div className={`sortRow inline ${focusGroupId ? "focusOnly" : ""}`}>
                   <label className="sortLabel" htmlFor="sortItems">
                     Sort
                   </label>
@@ -1028,7 +1438,7 @@ export default function TripDetail() {
               <div className="toolbarRight" />
             </div>
 
-            <div className="filterRow">
+            <div className={`filterRow ${focusGroupId ? "focusOnly" : ""}`}>
               <div className="searchWrap">
                 <input
                   className="input searchInput"
@@ -1143,110 +1553,35 @@ export default function TripDetail() {
                 )}
               </div>
             )}
+            </div>
           </div>
-        </div>
-        {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
-          <div className="sharedByLine">
-            Shared by {formatSharedBy(trip.ownerDisplayName)}
-          </div>
-        )}
-
-        <div className="content">
+          <div className="detailSectionDivider" />
+          <div className="detailCardContent">
           {inlineError && (
             <div className="inlineError" role="status">
               {inlineError}
             </div>
           )}
-
-          {shareOpen && (trip.shareId || shareUrlOverride) && (
-            <div
-              className="shareOverlay"
-              role="dialog"
-              aria-modal="true"
-              onClick={() => setShareOpen(false)}
-            >
-              <div className="shareModal" onClick={(e) => e.stopPropagation()}>
-                <div className="shareModalHeader">
-                  <div>
-                    <div className="shareModalTitle">Share collection</div>
-                    <div className="shareModalSubtitle">{trip.name}</div>
-                  </div>
-                  <button
-                    className="shareModalClose"
-                    type="button"
-                    aria-label="Close"
-                    onClick={() => setShareOpen(false)}
-                  >
-                    ×
-                  </button>
-                </div>
-                {shareMsg && <div className="shareModalMsg">{shareMsg}</div>}
-                <div className="shareModalActions">
-                  <div className="shareLinkRow">
-                    <button className="miniBtn blue" type="button" onClick={handleCopyShareLink}>
-                      Copy
-                    </button>
-                    <div className="shareLinkValue">{shareUrlFinal}</div>
-                  </div>
-                  <a
-                    className="secondary-btn linkBtn"
-                    href={`https://wa.me/?text=${encodeURIComponent(
-                      `${shareUrlFinal}`
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
-                    WhatsApp
-                  </a>
-                </div>
-              </div>
+          {inlineToast && (
+            <div className="inlineToast" role="status">
+              {inlineToast}
             </div>
           )}
-
-          {itemShare && (
-            <div
-              className="shareOverlay"
-              role="dialog"
-              aria-modal="true"
-              onClick={() => setItemShare(null)}
-            >
-              <div className="shareModal" onClick={(e) => e.stopPropagation()}>
-                <div className="shareModalHeader">
-                  <div>
-                    <div className="shareModalTitle">Share link</div>
-                    <div className="shareModalSubtitle">
-                      {(itemShare.title || "").trim() || "Saved link"}
-                    </div>
-                  </div>
-                  <button
-                    className="shareModalClose"
-                    type="button"
-                    aria-label="Close"
-                    onClick={() => setItemShare(null)}
-                  >
-                    ×
-                  </button>
-                </div>
-                {itemShareMsg && <div className="shareModalMsg">{itemShareMsg}</div>}
-                <div className="shareModalActions">
-                  <div className="shareLinkRow">
-                    <button className="miniBtn blue" type="button" onClick={handleCopyItemShare}>
-                      Copy
-                    </button>
-                    <div className="shareLinkValue">{itemShare.airbnbUrl}</div>
-                  </div>
-                  <a
-                    className="secondary-btn linkBtn"
-                    href={`https://wa.me/?text=${encodeURIComponent(itemShare.airbnbUrl)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
-                    WhatsApp
-                  </a>
-                </div>
+          {focusGroupId && (
+            <div className="focusBanner">
+              <div>
+                Showing this comparison group only.
               </div>
+              <button
+                className="miniBtn ghostBtn"
+                type="button"
+                onClick={() => {
+                  setFocusGroupId("");
+                  window.history.replaceState({}, "", window.location.pathname);
+                }}
+              >
+                Show all
+              </button>
             </div>
           )}
 
@@ -1257,7 +1592,7 @@ export default function TripDetail() {
                 Save your first link to this collection.
               </div>
             </div>
-          ) : filteredItems.length === 0 ? (
+          ) : (focusGroupId ? focusItems.length === 0 : filteredItems.length === 0) ? (
             <div className="emptyState">
               <div className="emptyTitle">Nothing found</div>
               <div className="emptyText">
@@ -1271,6 +1606,252 @@ export default function TripDetail() {
             </div>
           ) : (
             <div className={`itemList ${compactMode ? "compact" : ""}`}>
+              {!compareMode && orderedDecisionGroups.length > 0 && (
+                <div className="decisionSection">
+                  <div className="decisionHeader">
+                    <div className="decisionTitle">You're comparing these</div>
+                    {hasHiddenDecisionGroups && (
+                      <button
+                        className="miniBtn ghostBtn"
+                        type="button"
+                        onClick={() => setShowAllComparisons((prev) => !prev)}
+                      >
+                        {showAllComparisons ? "Hide extra groups" : "View all comparisons"}
+                      </button>
+                    )}
+                  </div>
+                  {showComparisonExplainer && (
+                    <div className="decisionExplainer">
+                      Grouped automatically — looks like you're deciding between these.
+                    </div>
+                  )}
+                  <div className="decisionGroups">
+                    {visibleDecisionGroups.map((group) => {
+                      const activeItems = group.items.filter((item) => !item.dismissed);
+                      if (activeItems.length < 2) {
+                        return null;
+                      }
+                      const shortlistedItems = activeItems.filter((item) => item.shortlisted);
+                      const dismissedCount = group.items.filter((item) => item.dismissed).length;
+                      const chosenItems = activeItems.filter((item) => item.chosen);
+                      const bannerDismissed = bannerDismissedGroupIds.has(group.id);
+                      const showDecisionBanner = chosenItems.length > 0 && !bannerDismissed;
+                      const chosenLink = chosenItems[0];
+                      const reviewOnly = reviewOnlyGroupIds.has(group.id);
+                      const showingItems =
+                        reviewOnly && shortlistedItems.length > 0 ? shortlistedItems : activeItems;
+                      const showFooter = shortlistedItems.length > 0 || dismissedCount > 0;
+                      const showNudge = shouldShowNudge({ ...group, items: activeItems });
+                      const candidateLinkId = candidateByGroup[group.id];
+                      return (
+                        <div
+                          key={group.id}
+                          id={`decision-group-${group.id}`}
+                          className={`decisionGroup ${
+                            highlightGroupId === group.id ? "highlight" : ""
+                          }`}
+                        >
+                          {showNudge && (
+                            <div className="decisionNudge">
+                              <span>Still deciding?</span>
+                              <button
+                                className="miniBtn ghostBtn"
+                                type="button"
+                                onClick={() => handleReviewGroup(group.id)}
+                              >
+                                Review
+                              </button>
+                            </div>
+                          )}
+                          {showDecisionBanner && (
+                            <div className="decisionBanner">
+                              <div>
+                                <div className="decisionBannerTitle">Decision made</div>
+                                <div className="decisionBannerSubtitle">Marked as chosen.</div>
+                              </div>
+                              <div className="decisionBannerActions">
+                                {activeItems.length > 1 && chosenLink && (
+                                  <button
+                                    className="miniBtn ghostBtn"
+                                    type="button"
+                                    onClick={() => {
+                                      trackEvent("archive_rest_clicked", {
+                                        decisionGroupId: group.id,
+                                        collectionId: trip.id,
+                                      });
+                                      activeItems.forEach((item) => {
+                                        if (item.id === chosenLink.id) return;
+                                        updateItemEngagement(trip.id, item.id, {
+                                          dismissed: true,
+                                          shortlisted: false,
+                                        });
+                                      });
+                                      archiveDecisionGroupOthers(group.id, chosenLink.id);
+                                    }}
+                                  >
+                                    Archive the rest
+                                  </button>
+                                )}
+                                <button
+                                  className="miniBtn ghostBtn"
+                                  type="button"
+                                  onClick={() =>
+                                    setBannerDismissedGroupIds((prev) => {
+                                      const next = new Set(prev);
+                                      next.add(group.id);
+                                      return next;
+                                    })
+                                  }
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          <div className="decisionRow">
+                            {showingItems.map((item) => {
+                              const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+                              const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                              const action = normalizePrimaryAction(item.primaryAction);
+                              const actionLabel = primaryActionLabel(action);
+                              const isStale = isStaleItem(item);
+                              const isChosen = !!item.chosen;
+                              const isShortlisted = !!item.shortlisted;
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`decisionItem ${isStale ? "stale" : ""} ${
+                                    isShortlisted ? "shortlisted" : ""
+                                  }`}
+                                >
+                                  <div className="decisionActions">
+                                    <button
+                                      className={`shortlistBtn ${isShortlisted ? "active" : ""}`}
+                                      type="button"
+                                      title={isShortlisted ? "Remove from shortlist" : "Shortlist"}
+                                      onClick={() => {
+                                        const next = !isShortlisted;
+                                        markExplainerSeen();
+                                        updateItemEngagement(trip.id, item.id, {
+                                          shortlisted: next,
+                                          dismissed: false,
+                                        });
+                                        setInlineToastMessage(next ? "Shortlisted" : "Removed from shortlist");
+                                        trackEvent("shortlist_toggled", {
+                                          linkId: item.id,
+                                          decisionGroupId: group.id,
+                                          collectionId: trip.id,
+                                          newState: next,
+                                        });
+                                        setLinkFlags(item, { shortlisted: next, dismissed: false }, group.id);
+                                      }}
+                                    >
+                                      {isShortlisted ? "★" : "☆"}
+                                    </button>
+                                    <button
+                                      className="dismissBtn"
+                                      type="button"
+                                      title="Dismiss"
+                                      onClick={() => {
+                                        markExplainerSeen();
+                                        updateItemEngagement(trip.id, item.id, {
+                                          shortlisted: false,
+                                          dismissed: true,
+                                        });
+                                        setInlineToastMessage("Dismissed");
+                                        setLinkFlags(item, { dismissed: true }, group.id);
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                  <button
+                                    className="decisionTitleText"
+                                    type="button"
+                                    onClick={() => handleOpenItem(item)}
+                                    title={titleParts.main}
+                                  >
+                                    {titleParts.main}
+                                  </button>
+                                  <div className="decisionMeta">
+                                    {domainLabel && (
+                                      <span className="domainPill small">{domainLabel}</span>
+                                    )}
+                                    {isChosen && <span className="chosenPill">Chosen</span>}
+                                  </div>
+                                  <button
+                                    className={`primaryActionBtn mini ${
+                                      isStale ? "stale" : ""
+                                    }`}
+                                    type="button"
+                                    onClick={() => handleOpenItem(item)}
+                                  >
+                                    {actionLabel}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {showFooter && (
+                            <div className="decisionFooter">
+                              <div className="decisionFooterText">
+                                Shortlisted {shortlistedItems.length} of {activeItems.length}
+                              </div>
+                              <div className="decisionFooterActions">
+                                <button
+                                  className="miniBtn ghostBtn"
+                                  type="button"
+                                  onClick={() =>
+                                    setReviewOnlyGroupIds((prev) => {
+                                      markExplainerSeen();
+                                      if (!prev.has(group.id)) {
+                                        trackEvent("review_shortlist_clicked", {
+                                          decisionGroupId: group.id,
+                                          collectionId: trip.id,
+                                        });
+                                      }
+                                      const next = new Set(prev);
+                                      if (next.has(group.id)) {
+                                        next.delete(group.id);
+                                      } else {
+                                        next.add(group.id);
+                                      }
+                                      return next;
+                                    })
+                                  }
+                                  disabled={shortlistedItems.length === 0}
+                                >
+                                  {reviewOnly ? "Show all" : "Review shortlist"}
+                                </button>
+                                {candidateLinkId && (
+                                  <button
+                                    className="miniBtn ghostBtn"
+                                    type="button"
+                                    onClick={() => {
+                                      markExplainerSeen();
+                                      trackEvent("mark_chosen_clicked", {
+                                        linkId: candidateLinkId,
+                                        decisionGroupId: group.id,
+                                        collectionId: trip.id,
+                                      });
+                                      markChosen(candidateLinkId, group.id);
+                                    }}
+                                  >
+                                    Mark chosen
+                                  </button>
+                                )}
+                              </div>
+                              {candidateLinkId && (
+                                <div className="decisionFooterHint">Looks like you've got a winner.</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {duplicateCount > 0 && (
                 <div className="dupeNotice">
                   <span>
@@ -1315,21 +1896,27 @@ export default function TripDetail() {
                       const tags = extractTags(item.note || "");
                       const mentions = extractMentions(item.note || "");
                       const displayChips = [...titleParts.meta, ...metadataChips];
+                      const isStale = isStaleItem(item);
+                      const action = normalizePrimaryAction(item.primaryAction);
+                      const actionLabel = primaryActionLabel(action);
+                      const isChosen = !!item.chosen;
                       return (
                         <div
                           key={item.id}
-                          className={`itemCard compareCard ${item.pinned ? "pinned" : ""}`}
+                          className={`itemCard compareCard ${item.pinned ? "pinned" : ""} ${
+                            isStale ? "stale" : ""
+                          } ${itemMenuOpenId === item.id ? "menuOpen" : ""}`}
                         >
                           <div className="compareCardHeader">
-                            <a
+                            <button
                               className="itemLink compareTitle titleClampFade"
-                              href={item.airbnbUrl}
-                              target="_blank"
-                              rel="noreferrer"
+                              type="button"
+                              onClick={() => handleOpenItem(item)}
                               title={titleParts.main}
                             >
                               {titleParts.main}
-                            </a>
+                            </button>
+                            {isChosen && <span className="chosenPill">Chosen</span>}
                             {domainLabel && <span className="domainPill">{domainLabel}</span>}
 
                             {(displayChips.length > 0 || tags.length > 0 || mentions.length > 0) && (
@@ -1375,36 +1962,13 @@ export default function TripDetail() {
                                 <img className="itemPinIcon" src={pinIcon} alt="" />
                               </span>
                             )}
-                            <div className="itemQuickActions" role="group" aria-label="Quick actions">
-                              <a
-                                className="iconBtn bare quickActionBtn"
-                                href={item.airbnbUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                aria-label="Open link in new tab"
-                                title="Open in new tab"
-                              >
-                                <IconExternal className="quickActionIcon" />
-                              </a>
-                              <button
-                                className="iconBtn bare quickActionBtn"
-                                type="button"
-                                onClick={() => handleCopyItemUrl(item)}
-                                aria-label="Copy link"
-                                title="Copy link"
-                              >
-                                <IconCopy className="quickActionIcon" />
-                              </button>
-                              <button
-                                className="iconBtn bare quickActionBtn danger"
-                                type="button"
-                                onClick={() => handleRemoveItem(item.id)}
-                                aria-label="Remove from collection"
-                                title="Remove"
-                              >
-                                <IconTrash className="quickActionIcon" />
-                              </button>
-                            </div>
+                            <button
+                              className={`primaryActionBtn ${isStale ? "stale" : ""}`}
+                              type="button"
+                              onClick={() => handleOpenItem(item)}
+                            >
+                              {actionLabel}
+                            </button>
                             <div className="itemMenuWrap">
                               <button
                                 className="itemMenuBtn"
@@ -1424,7 +1988,10 @@ export default function TripDetail() {
                                   <button
                                     className="itemMenuItem"
                                     type="button"
-                                    onClick={() => toggleItemPinned(trip.id, item.id, !item.pinned)}
+                                    onClick={() => {
+                                      toggleItemPinned(trip.id, item.id, !item.pinned);
+                                      setItemMenuOpenId("");
+                                    }}
                                   >
                                     {item.pinned ? "Unpin" : "Pin"}
                                   </button>
@@ -1446,6 +2013,8 @@ export default function TripDetail() {
                     })}
                   </div>
                 </div>
+              ) : focusGroupId ? (
+                focusItems.map((item) => renderListCard(item))
               ) : groupByDomain ? (
                 <div className="groupList">
                   {groupedItems.map((group) => {
@@ -1501,6 +2070,97 @@ export default function TripDetail() {
           )}
         </div>
       </div>
+      </div>
+
+      {shareOpen && (trip.shareId || shareUrlOverride) && (
+        <div
+          className="shareOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShareOpen(false)}
+        >
+          <div className="shareModal" onClick={(e) => e.stopPropagation()}>
+            <div className="shareModalHeader">
+              <div>
+                <div className="shareModalTitle">Share collection</div>
+                <div className="shareModalSubtitle">{trip.name}</div>
+              </div>
+              <button
+                className="shareModalClose"
+                type="button"
+                aria-label="Close"
+                onClick={() => setShareOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            {shareMsg && <div className="shareModalMsg">{shareMsg}</div>}
+            <div className="shareModalActions">
+              <div className="shareLinkRow">
+                <button className="miniBtn blue" type="button" onClick={handleCopyShareLink}>
+                  Copy
+                </button>
+                <div className="shareLinkValue">{shareUrlFinal}</div>
+              </div>
+              <a
+                className="secondary-btn linkBtn"
+                href={`https://wa.me/?text=${encodeURIComponent(`${shareUrlFinal}`)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
+                WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {itemShare && (
+        <div
+          className="shareOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setItemShare(null)}
+        >
+          <div className="shareModal" onClick={(e) => e.stopPropagation()}>
+            <div className="shareModalHeader">
+              <div>
+                <div className="shareModalTitle">Share link</div>
+                <div className="shareModalSubtitle">
+                  {(itemShare.title || "").trim() || "Saved link"}
+                </div>
+              </div>
+              <button
+                className="shareModalClose"
+                type="button"
+                aria-label="Close"
+                onClick={() => setItemShare(null)}
+              >
+                ×
+              </button>
+            </div>
+            {itemShareMsg && <div className="shareModalMsg">{itemShareMsg}</div>}
+            <div className="shareModalActions">
+              <div className="shareLinkRow">
+                <button className="miniBtn blue" type="button" onClick={handleCopyItemShare}>
+                  Copy
+                </button>
+                <div className="shareLinkValue">{itemShare.airbnbUrl}</div>
+              </div>
+              <a
+                className="secondary-btn linkBtn"
+                href={`https://wa.me/?text=${encodeURIComponent(itemShare.airbnbUrl)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img className="shareIconSmall" src={whatsappIcon} alt="" aria-hidden="true" />
+                WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

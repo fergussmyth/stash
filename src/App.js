@@ -3,6 +3,7 @@ import Home from "./pages/Home";
 import Trips from "./pages/Trips";
 import TripDetail from "./pages/TripDetail";
 import ShareTrip from "./pages/ShareTrip";
+import Review from "./pages/Review";
 import { TripsProvider } from "./hooks/useTrips";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import Login from "./pages/Login";
@@ -13,7 +14,10 @@ import stashLogo from "./assets/icons/stash-favicon.png";
 
 function AppShell() {
   const location = useLocation();
-  const hideNav = location.pathname.startsWith("/share/");
+  const hideNav =
+    location.pathname.startsWith("/share/") ||
+    location.pathname === "/trips" ||
+    location.pathname === "/";
   const { user } = useAuth();
 
   return (
@@ -28,6 +32,9 @@ function AppShell() {
             <div className="topNavLinks">
               <Link className="topNavLink" to="/trips">
                 Stashes
+              </Link>
+              <Link className="topNavLink" to="/review">
+                Review
               </Link>
               {user ? (
                 <Link className="topNavLink iconLink" to="/profile" aria-label="Profile">
@@ -48,6 +55,7 @@ function AppShell() {
         <Route path="/login" element={<Login />} />
         <Route path="/trips" element={<Trips />} />
         <Route path="/trips/:id" element={<TripDetail />} />
+        <Route path="/review" element={<Review />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings/extension" element={<ExtensionSettings />} />
         <Route path="/share/:shareId" element={<ShareTrip />} />

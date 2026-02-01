@@ -1,0 +1,198 @@
+import { useMemo, useState } from "react";
+
+function makeFallbackGradient(seed) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const colors = ["#0f172a", "#1e293b", "#0b3b5e", "#1f2a44", "#2b3655", "#0f3d3e"];
+  const pick = (offset) => colors[Math.abs(hash + offset) % colors.length];
+  return `linear-gradient(135deg, ${pick(0)} 0%, ${pick(2)} 50%, ${pick(4)} 100%)`;
+}
+
+export default function CollectionCard({
+  trip,
+  coverImageUrl,
+  coverImageSource,
+  isEditing,
+  editingName,
+  onEditingNameChange,
+  onRenameSave,
+  onRenameCancel,
+  menuOpen,
+  onToggleMenu,
+  onShare,
+  onTogglePin,
+  onDelete,
+  onOpen,
+  onStartRename,
+  formatLastUpdated,
+  IconExternal,
+  IconEdit,
+  IconTrash,
+  pinIcon,
+}) {
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  const linkCount = trip.items?.length || 0;
+  const coverSeed = useMemo(() => `${trip.id || ""}-${trip.name || ""}`, [trip.id, trip.name]);
+  const fallbackGradient = useMemo(() => makeFallbackGradient(coverSeed), [coverSeed]);
+  const isGradientCover =
+    coverImageSource === "gradient" ||
+    (coverImageUrl || "").startsWith("linear-gradient") ||
+    (coverImageUrl || "").startsWith("radial-gradient");
+  const isImageCover =
+    !!coverImageUrl && !isGradientCover && !(coverImageUrl || "").startsWith("data:");
+  const coverBackground = isGradientCover
+    ? coverImageUrl || fallbackGradient
+    : fallbackGradient;
+  return (
+    <div
+      className={`collectionCard ${trip.pinned ? "pinned" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (isEditing) return;
+        onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (isEditing) return;
+          onOpen();
+        }
+      }}
+    >
+      <div
+        className={`collectionCardCover ${coverLoaded ? "isLoaded" : ""}`}
+        style={{ backgroundImage: coverBackground }}
+        aria-hidden="true"
+      >
+        {isImageCover && (
+          <img
+            src={coverImageUrl}
+            alt=""
+            loading="lazy"
+            onLoad={() => setCoverLoaded(true)}
+            onError={() => setCoverLoaded(true)}
+          />
+        )}
+      </div>
+      <div className="collectionCardBody">
+        {isEditing ? (
+          <div className="tripRenameRow">
+            <input
+              className="input tripRenameInput"
+              value={editingName}
+              onChange={(event) => onEditingNameChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onRenameSave();
+                }
+                if (event.key === "Escape") {
+                  onRenameCancel();
+                }
+              }}
+            />
+            <div className="tripRenameActions">
+              <button className="miniBtn" type="button" onClick={onRenameSave}>
+                Save
+              </button>
+              <button className="miniBtn" type="button" onClick={onRenameCancel}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="tripHeaderTop">
+            <div className="tripHeaderMain">
+              <div className="tripName">{trip.name}</div>
+            </div>
+            <div className="tripMenuWrap" onClick={(event) => event.stopPropagation()}>
+              <button
+                className="tripMenuBtn"
+                type="button"
+                aria-label="Collection options"
+                onClick={onToggleMenu}
+              >
+                ⋮
+              </button>
+              {menuOpen && (
+                <div className="tripMenu" role="menu">
+                  <button className="tripMenuItem" type="button" onClick={onShare}>
+                    Share
+                  </button>
+                  <button className="tripMenuItem" type="button" onClick={onTogglePin}>
+                    {trip.pinned ? "Unpin" : "Pin"}
+                  </button>
+                  <button className="tripMenuItem danger" type="button" onClick={onDelete}>
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="tripMetaLine">
+          {linkCount} link{linkCount === 1 ? "" : "s"} · updated {formatLastUpdated(trip)}
+        </div>
+
+        {trip.pinned && (
+          <button
+            className="tripPinBtn"
+            type="button"
+            aria-label="Unpin collection"
+            title="Unpin collection"
+            onClick={(event) => {
+              event.stopPropagation();
+              onTogglePin();
+            }}
+          >
+            <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
+          </button>
+        )}
+
+        <div className="tripQuickActions" role="group" aria-label="Quick actions">
+          <button
+            className="iconBtn bare quickActionBtn"
+            type="button"
+            aria-label="Open collection"
+            title="Open"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen();
+            }}
+          >
+            <IconExternal className="quickActionIcon" />
+          </button>
+          <button
+            className="iconBtn bare quickActionBtn"
+            type="button"
+            aria-label="Rename collection"
+            title="Rename"
+            onClick={(event) => {
+              event.stopPropagation();
+              onStartRename();
+            }}
+          >
+            <IconEdit className="quickActionIcon" />
+          </button>
+          <button
+            className="iconBtn bare quickActionBtn danger"
+            type="button"
+            aria-label="Delete collection"
+            title="Delete"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+          >
+            <IconTrash className="quickActionIcon" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

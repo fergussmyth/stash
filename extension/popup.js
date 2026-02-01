@@ -1,7 +1,8 @@
 const BASE_URL = "https://acyuomgyhtpkbvbqgvyh.supabase.co/functions/v1";
 const AUTO_CLOSE_MS = 900;
 
-const collectionSelect = document.getElementById("collection");
+const collectionTrigger = document.getElementById("collectionTrigger");
+const collectionMenu = document.getElementById("collectionMenu");
 const noteInput = document.getElementById("note");
 const saveBtn = document.getElementById("saveBtn");
 const settingsBtn = document.getElementById("settingsBtn");
@@ -17,6 +18,9 @@ let activeTab = null;
 let settings = { token: "", lastCollectionId: "" };
 let isSaving = false;
 let isSaved = false;
+let selectedCollectionId = "";
+let selectedCollectionName = "";
+let hasCollections = false;
 
 function setStatus(message, tone = "") {
   statusEl.textContent = message || "";
@@ -48,7 +52,7 @@ function setSaveState(state) {
 }
 
 function updateSaveEnabled() {
-  const hasCollection = Boolean(collectionSelect.value);
+  const hasCollection = Boolean(selectedCollectionId);
   saveBtn.disabled = isSaving || !hasCollection || !settings.token;
 }
 
@@ -118,8 +122,12 @@ async function loadActiveTab() {
 async function loadCollections() {
   const base = sanitizeBase(BASE_URL);
   if (!settings.token) {
-    collectionSelect.innerHTML = "";
-    collectionSelect.disabled = true;
+    selectedCollectionId = "";
+    selectedCollectionName = "";
+    hasCollections = false;
+    collectionMenu.innerHTML = "";
+    collectionTrigger.textContent = "Set token in Settings";
+    collectionTrigger.disabled = true;
     setStatus("Set token in Settings.", "error");
     updateSaveEnabled();
     return;
@@ -137,27 +145,45 @@ async function loadCollections() {
 
     const payload = await response.json();
     const collections = payload.collections || [];
-    collectionSelect.innerHTML = "";
+    collectionMenu.innerHTML = "";
+    hasCollections = collections.length > 0;
+    selectedCollectionId = "";
+    selectedCollectionName = "";
 
     collections.forEach((collection) => {
-      const option = document.createElement("option");
-      option.value = collection.id;
-      option.textContent = `${collection.name} (${collection.link_count || 0})`;
-      option.dataset.name = collection.name;
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "dropdownItem";
+      item.dataset.value = collection.id;
+      item.dataset.name = collection.name;
+      item.textContent = `${collection.name} (${collection.link_count || 0})`;
+      item.addEventListener("click", () => {
+        selectCollection(collection.id, collection.name, item.textContent);
+        closeMenu();
+      });
+      collectionMenu.appendChild(item);
       if (collection.id === settings.lastCollectionId) {
-        option.selected = true;
+        selectedCollectionId = collection.id;
+        selectedCollectionName = collection.name;
       }
-      collectionSelect.appendChild(option);
     });
 
     if (collections.length === 0) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "No stashes yet";
-      collectionSelect.appendChild(option);
+      collectionTrigger.textContent = "No stashes yet";
+      collectionTrigger.disabled = true;
+    } else {
+      collectionTrigger.disabled = false;
     }
 
-    collectionSelect.disabled = collections.length === 0;
+    if (selectedCollectionId) {
+      const selectedItem = Array.from(collectionMenu.children).find(
+        (node) => node.dataset?.value === selectedCollectionId
+      );
+      const label = selectedItem?.textContent || "Choose a stash";
+      selectCollection(selectedCollectionId, selectedCollectionName, label);
+    } else {
+      collectionTrigger.textContent = "Choose a stash";
+    }
     updateSaveEnabled();
   } catch (err) {
     setStatus("Failed to load stashes.", "error");
@@ -176,7 +202,7 @@ async function handleSave() {
     return;
   }
 
-  const collectionId = collectionSelect.value;
+  const collectionId = selectedCollectionId;
   if (!collectionId) {
     setStatus("Pick a stash.", "error");
     return;
@@ -201,8 +227,7 @@ async function handleSave() {
     });
 
     const payload = await response.json();
-    const selectedOption = collectionSelect.selectedOptions[0];
-    const collectionName = selectedOption?.dataset?.name || selectedOption?.textContent || "";
+    const collectionName = selectedCollectionName || collectionTrigger.textContent || "";
 
     if (!response.ok) {
     const message =
@@ -232,31 +257,70 @@ async function handleSave() {
   }
 }
 
-settingsBtn.addEventListener("click", () => {
+function openMenu() {
+  if (collectionTrigger.disabled) return;
+  collectionMenu.classList.add("open");
+  collectionTrigger.setAttribute("aria-expanded", "true");
+}
+
+function closeMenu() {
+  collectionMenu.classList.remove("open");
+  collectionTrigger.setAttribute("aria-expanded", "false");
+}
+
+function toggleMenu() {
+  if (collectionMenu.classList.contains("open")) {
+    closeMenu();
+  } else {
+    openMenu();
+  }
+}
+
+function selectCollection(id, name, label) {
+  selectedCollectionId = id;
+  selectedCollectionName = name || label;
+  collectionTrigger.textContent = label;
+  Array.from(collectionMenu.children).forEach((node) => {
+    node.classList.toggle("active", node.dataset?.value === id);
+  });
+  if (!isSaved) {
+    setStatus("");
+  }
+  updateSaveEnabled();
+}
+
+function safeAddListener(el, event, handler) {
+  if (!el) return;
+  el.addEventListener(event, handler);
+}
+
+safeAddListener(collectionTrigger, "click", () => {
+  toggleMenu();
+});
+
+safeAddListener(settingsBtn, "click", () => {
   chrome.runtime.openOptionsPage();
 });
 
-openUrlBtn.addEventListener("click", () => {
+safeAddListener(openUrlBtn, "click", () => {
   if (activeTab?.url) {
     chrome.tabs.create({ url: activeTab.url });
   }
 });
 
-collectionSelect.addEventListener("change", () => {
-  if (!isSaved) {
-    setStatus("");
-  }
-  updateSaveEnabled();
-});
+safeAddListener(saveBtn, "click", handleSave);
 
-saveBtn.addEventListener("click", handleSave);
-
-(async function init() {
+document.addEventListener("DOMContentLoaded", async () => {
+  if (!collectionTrigger || !collectionMenu || !saveBtn || !statusEl) return;
+  document.addEventListener("mousedown", (event) => {
+    if (!collectionMenu.classList.contains("open")) return;
+    if (collectionMenu.contains(event.target)) return;
+    if (collectionTrigger.contains(event.target)) return;
+    closeMenu();
+  });
   await loadSettings();
   await loadActiveTab();
-
   setPageInfo(activeTab);
-
   await loadCollections();
   updateSaveEnabled();
-})();
+});
