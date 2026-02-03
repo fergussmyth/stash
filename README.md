@@ -1,4 +1,4 @@
-![Stash](src/assets/icons/stash-full-logo.png)
+<img src="src/assets/icons/stash-full-logo.png" alt="Stash" width="240" />
 
 A clean way to save links while you browse.
 
