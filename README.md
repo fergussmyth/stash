@@ -1,4 +1,4 @@
-# Stash
+![Stash](src/assets/icons/stash-full-logo.png)
 
 A clean way to save links while you browse.
 
