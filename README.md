@@ -1,4 +1,4 @@
-<img src="src/assets/icons/stash-full-logo.png" alt="Stash" width="240" />
+# Stash
 
 A clean way to save links while you browse.
 
