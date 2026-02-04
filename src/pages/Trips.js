@@ -1,6 +1,5 @@
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
-import { LoginForm } from "./Login";
 import Dropdown from "../components/Dropdown";
 import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
@@ -12,6 +11,7 @@ import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import CollectionCard from "../components/CollectionCard";
+import CollectionsIntroModal from "../components/CollectionsIntroModal";
 
 const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
 const CATEGORY_LABELS = {
@@ -108,6 +108,14 @@ export default function Trips() {
   const [editingTripId, setEditingTripId] = useState("");
   const [editingTripName, setEditingTripName] = useState("");
   const [toastMsg, setToastMsg] = useState("");
+  const [showInlineCreate, setShowInlineCreate] = useState(false);
+  const [inlineName, setInlineName] = useState("");
+  const [inlineTouched, setInlineTouched] = useState(false);
+  const [inlineSaving, setInlineSaving] = useState(false);
+  const [inlinePulse, setInlinePulse] = useState(false);
+  const [showCollectionsIntro, setShowCollectionsIntro] = useState(false);
+  const ghostCardRef = useRef(null);
+  const inlineCreateRef = useRef(null);
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
   const shareBase = rawShareBase.replace(/\/+$/, "");
   const rawCategory = searchParams.get("category");
@@ -158,6 +166,16 @@ export default function Trips() {
   }, [rawCategory, activeCategory, setSearchParams]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || loading) return;
+    if (process.env.NODE_ENV !== "production") {
+      window.localStorage.removeItem("collectionsIntroDismissed");
+    }
+    const dismissed = window.localStorage.getItem("collectionsIntroDismissed") === "true";
+    const shouldShow = !dismissed || trips.length === 0;
+    setShowCollectionsIntro(shouldShow);
+  }, [trips.length, loading]);
+
+  useEffect(() => {
     function handleDocumentClick(event) {
       const target = event.target;
       if (target && target.closest(".tripMenuWrap")) return;
@@ -181,6 +199,56 @@ export default function Trips() {
     document.addEventListener("mousedown", handleOutsideRename);
     return () => document.removeEventListener("mousedown", handleOutsideRename);
   }, [editingTripId]);
+
+  useEffect(() => {
+    function handleInlineClick(event) {
+      if (!showInlineCreate) return;
+      if (!inlineCreateRef.current) return;
+      if (inlineCreateRef.current.contains(event.target)) return;
+      cancelInlineCreate();
+    }
+
+    function handleInlineKey(event) {
+      if (!showInlineCreate) return;
+      if (event.key === "Escape") {
+        cancelInlineCreate();
+      }
+    }
+
+    document.addEventListener("mousedown", handleInlineClick);
+    document.addEventListener("keydown", handleInlineKey);
+    return () => {
+      document.removeEventListener("mousedown", handleInlineClick);
+      document.removeEventListener("keydown", handleInlineKey);
+    };
+  }, [showInlineCreate]);
+
+  async function handleInlineCreate() {
+    const trimmed = inlineName.trim();
+    if (!trimmed || inlineSaving) {
+      setInlineTouched(true);
+      setInlinePulse(true);
+      setTimeout(() => setInlinePulse(false), 180);
+      return;
+    }
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    setInlineSaving(true);
+    const id = await createTrip(trimmed, activeCategory);
+    setInlineSaving(false);
+    if (!id) return;
+    setInlineName("");
+    setInlineTouched(false);
+    setShowInlineCreate(false);
+  }
+
+  function cancelInlineCreate() {
+    setInlineName("");
+    setInlineTouched(false);
+    setShowInlineCreate(false);
+  }
 
   function togglePin(trip) {
     toggleTripPinned(trip.id, !trip.pinned);
@@ -250,6 +318,16 @@ export default function Trips() {
 
   return (
     <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <CollectionsIntroModal
+        open={showCollectionsIntro}
+        isEmpty={trips.length === 0}
+        onClose={() => {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("collectionsIntroDismissed", "true");
+          }
+          setShowCollectionsIntro(false);
+        }}
+      />
       <AppShell
         sidebar={
           <SidebarNav
@@ -273,23 +351,11 @@ export default function Trips() {
             onSearchChange={setSearchQuery}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
             actions={
-              <>
-                <Link className="topbarPill" to="/trips">
-                  Stashes
+              !user ? (
+                <Link className="topbarPill subtle" to="/login">
+                  Sign in
                 </Link>
-                <Link className="topbarPill" to="/review">
-                  Review
-                </Link>
-                {user ? (
-                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
-                  </Link>
-                ) : (
-                  <Link className="topbarPill subtle" to="/login">
-                    Sign in
-                  </Link>
-                )}
-              </>
+              ) : null
             }
           />
         }
@@ -298,75 +364,30 @@ export default function Trips() {
       >
         {toastMsg && <div className="toast">{toastMsg}</div>}
 
-        <div className="collectionsSplit">
-          <section className="panel p-5 collectionsPanel createPanel">
-            <div className="panelContent">
-              <div className="panelHeader">
-                <h2>Create collection</h2>
-                <p>Start a new list for saved links.</p>
-              </div>
-
-              {!user && (
-                <>
-                  <div className="muted">
-                    Sign in to create and sync collections across devices.
-                  </div>
-                  <LoginForm />
-                </>
-              )}
-
-              {user && (
-                <TripCreate
-                  createTrip={createTrip}
-                  inputRef={nameInputRef}
-                  activeCategory={activeCategory}
-                />
-              )}
-
-              {user && localImportAvailable && (
-                <div className="importBox">
-                  <div className="importText">Local collections found on this device.</div>
-                  <button className="miniBtn" type="button" onClick={importLocalTrips}>
-                    Import local collections to cloud
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="panel p-5 collectionsPanel listPanel">
+        <section className="panel p-5 collectionsPanel listPanel fullWidth">
             <div className="panelContent">
               <div className="listHeaderRow">
                 <div className="listTitleRow">
                   <div className="listTitle">Your collections</div>
-                  {user && (
-                    <span
-                      className="listCountBadge"
-                      aria-label={`${collectionsCount} collections`}
-                    >
-                      {collectionsCount}
-                    </span>
+                </div>
+                <div className="listHeaderActions">
+                  {user && filteredTrips.length > 0 && (
+                    <div className="sortRow inline">
+                      <Dropdown
+                        id="sortTrips"
+                        className="sortDropdown"
+                        value={sortMode}
+                        onChange={setSortMode}
+                        options={[
+                          { value: "updated", label: "Last updated" },
+                          { value: "name", label: "Name (A–Z)" },
+                          { value: "count", label: "Link count" },
+                        ]}
+                        ariaLabel="Sort collections"
+                      />
+                    </div>
                   )}
                 </div>
-                {user && filteredTrips.length > 0 && (
-                  <div className="sortRow inline">
-                    <label className="sortLabel" htmlFor="sortTrips">
-                      Sort
-                    </label>
-                    <Dropdown
-                      id="sortTrips"
-                      className="sortDropdown"
-                      value={sortMode}
-                      onChange={setSortMode}
-                      options={[
-                        { value: "updated", label: "Last updated" },
-                        { value: "name", label: "Name (A–Z)" },
-                        { value: "count", label: "Link count" },
-                      ]}
-                      ariaLabel="Sort collections"
-                    />
-                  </div>
-                )}
               </div>
 
               <div
@@ -378,32 +399,7 @@ export default function Trips() {
                       <div key={index} className="tripSkeleton" />
                     ))}
                   </div>
-                ) : user && categoryTrips.length === 0 ? (
-                  <div className="collectionsEmpty">
-                    <div className="collectionsEmptyIcon" aria-hidden="true">
-                      +
-                    </div>
-                    <div className="collectionsEmptyTitle">
-                      No {activeCategoryLabel} collections yet
-                    </div>
-                    <div className="collectionsEmptyText">
-                      Create one to start saving links.
-                    </div>
-                    <button
-                      className="primary-btn collectionsEmptyBtn"
-                      type="button"
-                      onClick={() => {
-                        nameInputRef.current?.scrollIntoView({
-                          behavior: "smooth",
-                          block: "center",
-                        });
-                        nameInputRef.current?.focus();
-                      }}
-                    >
-                      Create a {activeCategoryLabel} collection
-                    </button>
-                  </div>
-                ) : user && filteredTrips.length === 0 ? (
+                ) : user && filteredTrips.length === 0 && categoryTrips.length > 0 ? (
                   <div className="tripEmptyState">
                     <div className="tripEmptyCallout">
                       <div className="tripEmptyIcon static" aria-hidden="true">
@@ -441,51 +437,156 @@ export default function Trips() {
                     </div>
                   </div>
                 ) : (
-                  <div className="collectionsGrid">
-                    {sortedTrips.map((trip) => (
-                      <CollectionCard
-                        key={trip.id}
-                        trip={trip}
-                        coverImageUrl={trip.coverImageUrl}
-                        coverImageSource={trip.coverImageSource}
-                        isEditing={editingTripId === trip.id}
-                        editingName={editingTripName}
-                        onEditingNameChange={setEditingTripName}
-                        onRenameSave={() => handleRenameTrip(trip)}
-                        onRenameCancel={() => {
-                          setEditingTripId("");
-                          setEditingTripName("");
+                  <>
+                    <div className="collectionsGrid">
+                      <div
+                        ref={ghostCardRef}
+                        className={`collectionCard ghostCreateCard ${
+                          showInlineCreate ? "isOpen" : ""
+                        }`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          if (!user) {
+                            navigate("/login");
+                            return;
+                          }
+                          setShowInlineCreate(true);
+                          setTimeout(() => nameInputRef.current?.focus(), 0);
                         }}
-                        menuOpen={menuOpenId === trip.id}
-                        onToggleMenu={() =>
-                          setMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
-                        }
-                        onShare={() => openShare(trip)}
-                        onTogglePin={() => togglePin(trip)}
-                        onDelete={() => {
-                          setMenuOpenId("");
-                          deleteTrip(trip.id);
-                          setToastMsg("Deleted");
-                          setTimeout(() => setToastMsg(""), 1500);
+                        onKeyDown={(event) => {
+                          if (event.target?.tagName === "INPUT") return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            if (!user) {
+                              navigate("/login");
+                              return;
+                            }
+                            setShowInlineCreate(true);
+                            setTimeout(() => nameInputRef.current?.focus(), 0);
+                          }
                         }}
-                        onOpen={() => navigate(`/trips/${trip.id}`)}
-                        onStartRename={() => {
-                          setEditingTripId(trip.id);
-                          setEditingTripName(trip.name || "");
-                        }}
-                        formatLastUpdated={formatLastUpdated}
-                        IconExternal={IconExternal}
-                        IconEdit={IconEdit}
-                        IconTrash={IconTrash}
-                        pinIcon={pinIcon}
-                      />
-                    ))}
-                  </div>
+                      >
+                        {showInlineCreate && user ? (
+                          <div className="ghostCreateBody inlineCreate" ref={inlineCreateRef}>
+                            <div className="ghostCreateInputRow">
+                              <input
+                                ref={nameInputRef}
+                                className={`input ghostCreateInput ${
+                                  inlineTouched && !inlineName.trim() ? "isInvalid" : ""
+                                } ${inlinePulse ? "isPulse" : ""}`}
+                                placeholder="Name your collection"
+                                value={inlineName}
+                                onChange={(event) => setInlineName(event.target.value)}
+                                onBlur={() => setInlineTouched(true)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    handleInlineCreate();
+                                  }
+                                  if (event.key === " ") {
+                                    event.stopPropagation();
+                                  }
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    cancelInlineCreate();
+                                  }
+                                }}
+                                aria-invalid={inlineTouched && !inlineName.trim()}
+                              />
+                              <div className="ghostCreateActions">
+                                <button
+                                  className="ghostCreateIconBtn save"
+                                  type="button"
+                                  onClick={handleInlineCreate}
+                                  title="Create collection"
+                                  aria-label="Create collection"
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path
+                                      d="M5 12l4 4 10-10"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  className="ghostCreateIconBtn cancel"
+                                  type="button"
+                                  onClick={cancelInlineCreate}
+                                  title="Cancel"
+                                  aria-label="Cancel"
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path
+                                      d="M6 6l12 12M18 6l-12 12"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="ghostCreateBody">
+                            <div className="ghostCreateIcon" aria-hidden="true">
+                              +
+                            </div>
+                            <div className="ghostCreateText">New collection</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {sortedTrips.map((trip) => (
+                        <CollectionCard
+                          key={trip.id}
+                          trip={trip}
+                          coverImageUrl={trip.coverImageUrl}
+                          coverImageSource={trip.coverImageSource}
+                          isEditing={editingTripId === trip.id}
+                          editingName={editingTripName}
+                          onEditingNameChange={setEditingTripName}
+                          onRenameSave={() => handleRenameTrip(trip)}
+                          onRenameCancel={() => {
+                            setEditingTripId("");
+                            setEditingTripName("");
+                          }}
+                          menuOpen={menuOpenId === trip.id}
+                          onToggleMenu={() =>
+                            setMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
+                          }
+                          onShare={() => openShare(trip)}
+                          onTogglePin={() => togglePin(trip)}
+                          onDelete={() => {
+                            setMenuOpenId("");
+                            deleteTrip(trip.id);
+                            setToastMsg("Deleted");
+                            setTimeout(() => setToastMsg(""), 1500);
+                          }}
+                          onOpen={() => navigate(`/trips/${trip.id}`)}
+                          onStartRename={() => {
+                            setEditingTripId(trip.id);
+                            setEditingTripName(trip.name || "");
+                          }}
+                          formatLastUpdated={formatLastUpdated}
+                          IconExternal={IconExternal}
+                          IconEdit={IconEdit}
+                          IconTrash={IconTrash}
+                          pinIcon={pinIcon}
+                        />
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
-          </section>
-        </div>
+        </section>
       </AppShell>
       {shareTrip && (
         <div
@@ -539,89 +640,5 @@ export default function Trips() {
         </div>
       )}
     </div>
-  );
-}
-
-function TripCreate({ createTrip, disabled, inputRef, activeCategory }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState(activeCategory);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [touched, setTouched] = useState(false);
-  const trimmed = name.trim();
-  const canCreate = trimmed.length > 0;
-  const showError = touched && !canCreate;
-
-  useEffect(() => {
-    setType(activeCategory);
-  }, [activeCategory]);
-
-  async function handleCreate() {
-    if (!canCreate || disabled || isSubmitting) {
-      setTouched(true);
-      return;
-    }
-    setIsSubmitting(true);
-    const id = await createTrip(trimmed, type);
-    setIsSubmitting(false);
-    if (!id) return;
-    setName("");
-    setType(activeCategory);
-    setTouched(false);
-  }
-
-  return (
-    <form
-      className="createTripForm"
-      onSubmit={(event) => {
-        event.preventDefault();
-        handleCreate();
-      }}
-    >
-      <div className="fieldGroup">
-        <label className="fieldLabel" htmlFor="collectionName">
-          Collection name
-        </label>
-        <input
-          id="collectionName"
-          className="input"
-          placeholder="Name your collection"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => setTouched(true)}
-          aria-invalid={showError}
-          disabled={disabled || isSubmitting}
-          ref={inputRef}
-        />
-        <div className="fieldHelp">
-          e.g. Gym prep, React refs, Trip ideas
-        </div>
-        {showError && <div className="fieldError">Name is required.</div>}
-      </div>
-      <div className="createTripRow">
-        <div className="fieldGroup">
-          <label className="fieldLabel" htmlFor="collectionCategory">
-            Category
-          </label>
-          <select
-            id="collectionCategory"
-            className="select"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            disabled={disabled || isSubmitting}
-          >
-            <option value="general">General</option>
-            <option value="travel">Travel</option>
-            <option value="fashion">Fashion</option>
-          </select>
-        </div>
-        <button
-          className="primary-btn createTripBtn"
-          type="submit"
-          disabled={!canCreate || disabled || isSubmitting}
-        >
-          {isSubmitting ? "Creating..." : "Create collection"}
-        </button>
-      </div>
-    </form>
   );
 }

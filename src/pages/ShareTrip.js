@@ -193,80 +193,68 @@ export default function ShareTrip() {
   }
 
   return (
-    <div className="page">
-      <div className="card glow">
-        <h1>
-          {trip?.name || "Collection"} <span>Shared</span>
-        </h1>
-        {!loading && trip && (
-          <div className="sharedByLine">
-            Shared by {titleCase(formatSharedBy(ownerDisplayName))}
+    <div className="page sharePage">
+      <div className="shareShell">
+        <div className="shareHeader">
+          <div className="shareBrand">
+            <div className="shareBrandTitle">Stash</div>
+            <div className="shareBrandTagline">Save what matters. Find it later.</div>
           </div>
-        )}
-
-        <div className="content">
-          {loadError && <p className="warning">{loadError}</p>}
+          <div className="shareTitle">
+            {trip?.name || "Collection"} <span>Shared</span>
+          </div>
+          {!loading && trip && (
+            <div className="sharedByLine">
+              Shared by {titleCase(formatSharedBy(ownerDisplayName))}
+            </div>
+          )}
           {!loading && trip && <div className="readOnlyBadge">Read-only</div>}
+          <div className="shareActions">
+            <Link className="shareGhostBtn" to="/">
+              Home
+            </Link>
+            <Link className="shareGhostBtn" to="/login">
+              Sign in
+            </Link>
+          </div>
+        </div>
+
+        <div className="shareContent">
+          {loadError && <p className="warning">{loadError}</p>}
           {loading ? (
             <p className="muted">Loading shared collection...</p>
           ) : items.length === 0 ? (
             <p className="muted">Nothing here yet — stash something.</p>
           ) : (
-            <div className="itemList">
+            <div className="shareCardList">
               {items.map((item) => (
-                <div key={item.id} className="itemCard">
-                  <div className="itemTop">
-                    {(() => {
-                      const titleParts = splitTitleParts(item.title, item.airbnbUrl);
-                      const { rating, chips } = splitMetaParts(titleParts.meta);
-                      const metadataChips = buildMetadataChips(item.metadata);
-                      const domainChip = item.domain || getDomain(item.airbnbUrl);
-                      const displayChips =
-                        metadataChips.length > 0
-                          ? metadataChips
-                          : domainChip
-                            ? [domainChip]
-                            : [];
-                      return (
-                        <div className="itemTitleBlock">
-                          <button
-                            className="itemTitleLink"
-                            type="button"
-                            onClick={() =>
-                              window.open(item.airbnbUrl, "_blank", "noopener,noreferrer")
-                            }
-                          >
-                            {titleParts.main}
-                          </button>
-                          {(rating || chips.length > 0 || displayChips.length > 0) && (
-                            <div className="itemMetaRow">
-                              {rating && <span className="ratingPill">⭐ {rating}</span>}
-                              {chips.length > 0 && (
-                                <div className="metaChips">
-                                  {chips.map((part) => (
-                                    <span key={part} className="metaChip">
-                                      {part}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {displayChips.length > 0 && (
-                                <div className="metaChips">
-                                  {displayChips.map((part) => (
-                                    <span key={part} className="metaChip">
-                                      {part}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
+                <button
+                  key={item.id}
+                  className="shareItemCard"
+                  type="button"
+                  onClick={() =>
+                    window.open(item.airbnbUrl, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  <div className="shareItemIcon">
+                    {item.domain ? (
+                      <img
+                        src={`https://www.google.com/s2/favicons?domain=${item.domain}&sz=64`}
+                        alt=""
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <span aria-hidden="true">↗</span>
+                    )}
                   </div>
-                </div>
+                  <div className="shareItemText">
+                    <div className="shareItemTitle">{item.title || "Shared link"}</div>
+                    <div className="shareItemSub">
+                      {item.domain || getDomain(item.airbnbUrl)}
+                    </div>
+                  </div>
+                  <span className="shareItemOpen" aria-hidden="true">↗</span>
+                </button>
               ))}
             </div>
           )}

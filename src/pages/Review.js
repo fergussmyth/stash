@@ -1,13 +1,38 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
 import { supabase } from "../lib/supabaseClient";
+import AppShell from "../components/AppShell";
+import SidebarNav from "../components/SidebarNav";
+import TopBar from "../components/TopBar";
+import Dropdown from "../components/Dropdown";
+import stashLogo from "../assets/icons/stash-favicon.png";
+import userIcon from "../assets/icons/user.png";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
+
+function normalizeCategory(input = "") {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (CATEGORY_OPTIONS.includes(normalized)) return normalized;
+  return "general";
+}
+
+function formatDecisionDate(timestamp) {
+  if (!timestamp) return "recently";
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
 export default function Review() {
   const { trips, user } = useTrips();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortMode, setSortMode] = useState("newest");
 
   async function trackEvent(eventName, payload = {}) {
     const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
@@ -73,6 +98,71 @@ export default function Review() {
     });
   }, [items]);
 
+  const decisions = useMemo(() => {
+    const entries = [];
+    for (const group of comparisons) {
+      const updatedAt = Math.max(
+        ...group.items.map((item) => item.lastOpenedAt || item.addedAt || 0),
+        0
+      );
+      entries.push({
+        id: `compare-${group.id}`,
+        type: "compare",
+        title: `${group.items.length} listings to compare`,
+        tripName: group.items[0]?.tripName || "Collection",
+        updatedAt,
+        onOpen: () => handleFocusGroup(group),
+      });
+    }
+    for (const item of shortlisted) {
+      entries.push({
+        id: `shortlist-${item.id}`,
+        type: "shortlist",
+        title: item.title || "Saved link",
+        tripName: item.tripName || "Collection",
+        updatedAt: item.lastOpenedAt || item.addedAt || 0,
+        onOpen: () => handleFocusItem(item),
+      });
+    }
+    for (const item of stalled) {
+      entries.push({
+        id: `stalled-${item.id}`,
+        type: "stalled",
+        title: item.title || "Saved link",
+        tripName: item.tripName || "Collection",
+        updatedAt: item.lastOpenedAt || item.addedAt || 0,
+        onOpen: () => handleFocusItem(item),
+      });
+    }
+    return entries;
+  }, [comparisons, shortlisted, stalled]);
+
+  const filteredDecisions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const filtered = query
+      ? decisions.filter((decision) => {
+          return (
+            (decision.title || "").toLowerCase().includes(query) ||
+            (decision.tripName || "").toLowerCase().includes(query)
+          );
+        })
+      : decisions;
+    const sorted = [...filtered].sort((a, b) => {
+      const diff = (a.updatedAt || 0) - (b.updatedAt || 0);
+      return sortMode === "oldest" ? diff : -diff;
+    });
+    return sorted;
+  }, [decisions, searchQuery, sortMode]);
+
+  const categoryCounts = useMemo(
+    () =>
+      CATEGORY_OPTIONS.reduce((acc, category) => {
+        acc[category] = trips.filter((trip) => normalizeCategory(trip.type) === category).length;
+        return acc;
+      }, {}),
+    [trips]
+  );
+
   function handleFocusGroup(group) {
     const tripId = group.items[0]?.tripId;
     if (!tripId) return;
@@ -85,87 +175,141 @@ export default function Review() {
     navigate(`/trips/${item.tripId}`);
   }
 
+  const hasDecisions = decisions.length > 0;
+
   return (
-    <div className="page reviewPage min-h-screen app-bg text-[rgb(var(--text))]">
-      <div className="card glow">
-        <h1>
-          Review <span>Decisions</span>
-        </h1>
-        <div className="muted">Things you're still deciding on.</div>
+    <div className="page reviewPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <AppShell
+        sidebar={
+          <SidebarNav
+            brandIcon={
+              <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+            }
+            activeSection={null}
+            categoryCounts={categoryCounts}
+            onSelectSection={(category) => {
+              navigate(`/trips?category=${category}`);
+              setSidebarOpen(false);
+            }}
+            onNavigate={() => setSidebarOpen(false)}
+          />
+        }
+        topbar={
+          <TopBar
+            title="Review"
+            subtitle="Things you're still deciding on."
+            searchValue=""
+            onSearchChange={() => {}}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            actions={
+              <>
+                {user ? (
+                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
+                  </Link>
+                ) : null}
+              </>
+            }
+          />
+        }
+        isSidebarOpen={sidebarOpen}
+        onCloseSidebar={() => setSidebarOpen(false)}
+      >
+        <div className="reviewGrid">
+          <section className="reviewCardPanel">
+            <div className="reviewCardHeader">
+              {hasDecisions && <div className="reviewCardTitle">Open decisions</div>}
+              {hasDecisions && (
+                <div className="reviewCardControls">
+                  <input
+                    className="input reviewSearchInput"
+                    type="search"
+                    placeholder="Search decisions..."
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                  />
+                  <Dropdown
+                    value={sortMode}
+                    onChange={setSortMode}
+                    options={[
+                      { value: "newest", label: "Newest first" },
+                      { value: "oldest", label: "Oldest first" },
+                    ]}
+                    ariaLabel="Sort decisions"
+                    buttonClassName="reviewSortBtn"
+                    menuClassName="reviewSortMenu"
+                  />
+                </div>
+              )}
+            </div>
 
-        {comparisons.length === 0 && shortlisted.length === 0 && stalled.length === 0 ? (
-          <div className="reviewEmpty">
-            <div className="reviewEmptyTitle">All clear</div>
-            <div className="reviewEmptyText">No comparisons or shortlists right now.</div>
-            <Link className="miniBtn linkBtn" to="/trips">
-              Back to collections
-            </Link>
-          </div>
-        ) : (
-          <div className="reviewSections">
-            {comparisons.length > 0 && (
-              <section className="reviewSection">
-                <h2>Comparisons</h2>
-                <div className="reviewList">
-                  {comparisons.map((group) => (
-                    <button
-                      key={group.id}
-                      type="button"
-                      className="reviewCard"
-                      onClick={() => handleFocusGroup(group)}
-                    >
-                      <div className="reviewTitle">
-                        {group.items[0]?.tripName || "Collection"}
+            {filteredDecisions.length === 0 ? (
+              <div className="reviewEmptyState">
+                <svg
+                  className="reviewEmptyIcon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M8 12l2.5 2.5L16 9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <div className="reviewEmptyTitle">All clear</div>
+                <div className="reviewEmptyText">
+                  No comparisons or shortlists right now.
+                </div>
+                <Link className="reviewPrimaryBtn" to="/trips">
+                  <span className="reviewBtnIcon" aria-hidden="true">‹</span>
+                  Back to collections
+                </Link>
+              </div>
+            ) : (
+              <div className="decisionList">
+                {filteredDecisions.map((decision) => (
+                  <div key={decision.id} className="decisionRow">
+                    <div className="decisionInfo">
+                      <div className="decisionTitle">{decision.title}</div>
+                      <div className="decisionMeta">
+                        <span className="decisionTag">{decision.tripName}</span>
+                        <span className={`decisionStatus ${decision.type}`}>
+                          {decision.type}
+                        </span>
+                        <span className="decisionUpdated">
+                          Updated {formatDecisionDate(decision.updatedAt)}
+                        </span>
                       </div>
-                      <div className="reviewMeta">
-                        {group.items.length} items comparing
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {shortlisted.length > 0 && (
-              <section className="reviewSection">
-                <h2>Shortlisted</h2>
-                <div className="reviewList">
-                  {shortlisted.map((item) => (
+                    </div>
                     <button
-                      key={item.id}
+                      className="decisionPrimaryBtn"
                       type="button"
-                      className="reviewCard"
-                      onClick={() => handleFocusItem(item)}
+                      onClick={decision.onOpen}
                     >
-                      <div className="reviewTitle">{item.title || "Saved link"}</div>
-                      <div className="reviewMeta">{item.tripName}</div>
+                      Open
                     </button>
-                  ))}
-                </div>
-              </section>
+                  </div>
+                ))}
+              </div>
             )}
+          </section>
 
-            {stalled.length > 0 && (
-              <section className="reviewSection">
-                <h2>Stalled</h2>
-                <div className="reviewList">
-                  {stalled.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="reviewCard"
-                      onClick={() => handleFocusItem(item)}
-                    >
-                      <div className="reviewTitle">{item.title || "Saved link"}</div>
-                      <div className="reviewMeta">{item.tripName}</div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
-      </div>
+          <aside className="reviewCardPanel tipsCard">
+            <div className="reviewCardTitle">Tips</div>
+            <p>Use Review to compare options and keep shortlists tidy.</p>
+          </aside>
+        </div>
+      </AppShell>
     </div>
   );
 }

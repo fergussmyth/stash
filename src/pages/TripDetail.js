@@ -1,4 +1,4 @@
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
 import { supabase } from "../lib/supabaseClient";
@@ -6,6 +6,12 @@ import shareIcon from "../assets/icons/share.png";
 import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
 import { LoginForm } from "./Login";
+import AppShell from "../components/AppShell";
+import SidebarNav from "../components/SidebarNav";
+import TopBar from "../components/TopBar";
+import Dropdown from "../components/Dropdown";
+import stashLogo from "../assets/icons/stash-favicon.png";
+import userIcon from "../assets/icons/user.png";
 
 function IconList(props) {
   return (
@@ -256,6 +262,58 @@ function buildMetadataChips(metadata = {}) {
   return chips;
 }
 
+function normalizeChipKey(text = "") {
+  const cleaned = String(text || "").trim().toLowerCase();
+  const match = cleaned.match(/(\d+(?:\.\d+)?)\s*(bedrooms?|beds?|bathrooms?|guests?)/i);
+  if (!match) return cleaned;
+  const label = match[2]
+    .replace(/bedrooms?/, "bedroom")
+    .replace(/beds?/, "bed")
+    .replace(/bathrooms?/, "bathroom")
+    .replace(/guests?/, "guest");
+  return label;
+}
+
+function mergeMetaChips(...groups) {
+  const seen = new Set();
+  const out = [];
+  for (const group of groups) {
+    for (const chip of group || []) {
+      const key = normalizeChipKey(chip);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(chip);
+    }
+  }
+  return out;
+}
+
+function extractAirbnbMetaFromTitle(title = "") {
+  const text = String(title || "");
+  const chips = [];
+  const addChip = (value) => {
+    if (!value) return;
+    if (!chips.includes(value)) chips.push(value);
+  };
+  let rating = "";
+  const ratingMatch =
+    text.match(/[⭐★]\s*([0-9]+(?:\.[0-9]+)?)/) ||
+    text.match(/([0-9]+(?:\.[0-9]+)?)\s*stars?/i) ||
+    text.match(/([0-9]+(?:\.[0-9]+)?)\s*rating/i);
+  if (ratingMatch) {
+    rating = ratingMatch[1];
+  }
+  const bedsMatch = text.match(/(\d+)\s+bed(s)?/i);
+  if (bedsMatch) addChip(`${bedsMatch[1]} beds`);
+  const bedroomsMatch = text.match(/(\d+)\s+bedroom(s)?/i);
+  if (bedroomsMatch) addChip(`${bedroomsMatch[1]} bedrooms`);
+  const bathsMatch = text.match(/(\d+)\s+bath(room)?s?/i);
+  if (bathsMatch) addChip(`${bathsMatch[1]} bathrooms`);
+  const guestsMatch = text.match(/(\d+)\s+guest(s)?/i);
+  if (guestsMatch) addChip(`${guestsMatch[1]} guests`);
+  return { rating, chips };
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_MS = 30 * DAY_MS;
 
@@ -345,7 +403,9 @@ function CollectionCoverHeader({ trip, onShare, showShare }) {
 export default function TripDetail() {
   const { id } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const {
+    trips,
     tripsById,
     removeItem,
     updateItemNote,
@@ -357,6 +417,7 @@ export default function TripDetail() {
     loading,
   } = useTrips();
   const [sortMode, setSortMode] = useState("newest");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
   const [compareEnabled, setCompareEnabled] = useState(false);
@@ -410,6 +471,14 @@ export default function TripDetail() {
   const shareBase = rawShareBase.replace(/\/+$/, "");
   const shareUrlFromBase = trip?.shareId ? `${shareBase}/share/${trip.shareId}` : "";
   const shareUrlFinal = shareUrlOverride || shareUrlFromBase || shareUrl;
+  const categoryCounts = useMemo(
+    () =>
+      ["general", "travel", "fashion"].reduce((acc, category) => {
+        acc[category] = trips.filter((t) => (t.type || "general") === category).length;
+        return acc;
+      }, {}),
+    [trips]
+  );
 
   useEffect(() => {
     if (trip?.shareId && shareUrlOverride) {
@@ -1122,7 +1191,11 @@ export default function TripDetail() {
     const { rating, chips } = splitMetaParts(titleParts.meta);
     const metadataChips = buildMetadataChips(item.metadata);
     const domainLabel = item.domain || getDomain(item.airbnbUrl);
-    const allChips = [...chips, ...metadataChips];
+    const fallbackMeta =
+      item.airbnbUrl && item.airbnbUrl.includes("airbnb.")
+        ? extractAirbnbMetaFromTitle(item.title)
+        : { rating: "", chips: [] };
+    const allChips = mergeMetaChips(chips, metadataChips, fallbackMeta.chips);
     const tags = extractTags(item.note || "");
     const mentions = extractMentions(item.note || "");
     const isSelected = compareSelected.has(item.id);
@@ -1181,7 +1254,9 @@ export default function TripDetail() {
                     </button>
                     {isChosen && <span className="chosenPill">Chosen</span>}
                     {domainLabel && <span className="domainPill">{domainLabel}</span>}
-                    {rating && <span className="ratingPill">⭐ {rating}</span>}
+                    {(rating || fallbackMeta.rating) && (
+                      <span className="ratingPill">⭐ {rating || fallbackMeta.rating}</span>
+                    )}
                   </div>
                   {allChips.length > 0 && (
                     <div className="itemMetaRow">
@@ -1310,22 +1385,46 @@ export default function TripDetail() {
 
   if (!user && !loading) {
     return (
-      <div className="page">
-        <div className="card glow">
-          <h1>
-            Collection <span>Access</span>
-          </h1>
-
-          <div className="content">
+      <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+        <AppShell
+          sidebar={
+            <SidebarNav
+              brandIcon={
+                <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+              }
+              activeSection={null}
+              categoryCounts={categoryCounts}
+              onSelectSection={(category) => {
+                navigate(`/trips?category=${category}`);
+                setSidebarOpen(false);
+              }}
+              onNavigate={() => setSidebarOpen(false)}
+            />
+          }
+          topbar={
+            <TopBar
+              title="Collection"
+              subtitle="Sign in to view and edit your collections."
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+              actions={
+                !user ? (
+                  <Link className="topbarPill subtle" to="/login">
+                    Sign in
+                  </Link>
+                ) : null
+              }
+            />
+          }
+          isSidebarOpen={sidebarOpen}
+          onCloseSidebar={() => setSidebarOpen(false)}
+        >
+          <div className="panel p-5">
             <p className="muted">Sign in to view and edit your collections.</p>
             <LoginForm />
-            <div className="navRow">
-              <Link className="miniBtn linkBtn" to="/login">
-                Sign in
-              </Link>
-            </div>
           </div>
-        </div>
+        </AppShell>
       </div>
     );
   }
@@ -1333,29 +1432,94 @@ export default function TripDetail() {
   // If trip doesn't exist (bad URL / deleted), show a friendly message
   if (!trip) {
     return (
-      <div className="page">
-        <div className="card glow">
-          <h1>
-            Collection <span>Not found</span>
-          </h1>
-
-          <div className="content">
+      <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+        <AppShell
+          sidebar={
+            <SidebarNav
+              brandIcon={
+                <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+              }
+              activeSection={null}
+              categoryCounts={categoryCounts}
+              onSelectSection={(category) => {
+                navigate(`/trips?category=${category}`);
+                setSidebarOpen(false);
+              }}
+              onNavigate={() => setSidebarOpen(false)}
+            />
+          }
+          topbar={
+            <TopBar
+              title="Collection"
+              subtitle="That collection doesn’t exist."
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+              actions={
+                !user ? (
+                  <Link className="topbarPill subtle" to="/login">
+                    Sign in
+                  </Link>
+                ) : null
+              }
+            />
+          }
+          isSidebarOpen={sidebarOpen}
+          onCloseSidebar={() => setSidebarOpen(false)}
+        >
+          <div className="panel p-5">
             <p className="muted">That collection doesn’t exist (it may have been deleted).</p>
-
             <div className="navRow">
-              <Link className="miniBtn linkBtn" to="/trips">
+              <Link
+                className="miniBtn linkBtn"
+                to={trip?.type ? `/trips?category=${trip.type}` : "/trips"}
+              >
                 ← Back to Collections
               </Link>
             </div>
           </div>
-        </div>
+        </AppShell>
       </div>
     );
   }
 
   return (
-    <div className="page">
-      <div className="detailCollectionCard">
+    <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <AppShell
+        sidebar={
+          <SidebarNav
+            brandIcon={
+              <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
+            }
+            activeSection={null}
+            categoryCounts={categoryCounts}
+            onSelectSection={(category) => {
+              navigate(`/trips?category=${category}`);
+              setSidebarOpen(false);
+            }}
+            onNavigate={() => setSidebarOpen(false)}
+          />
+        }
+        topbar={
+          <TopBar
+            title={trip?.name || "Collection"}
+            subtitle={collectionSubtitle}
+            searchValue={searchText}
+            onSearchChange={setSearchText}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            actions={
+              !user ? (
+                <Link className="topbarPill subtle" to="/login">
+                  Sign in
+                </Link>
+              ) : null
+            }
+          />
+        }
+        isSidebarOpen={sidebarOpen}
+        onCloseSidebar={() => setSidebarOpen(false)}
+      >
+        <div className="detailCollectionCard">
         <CollectionCoverHeader
           trip={trip}
           onShare={handleToggleShare}
@@ -1365,7 +1529,10 @@ export default function TripDetail() {
         <div className="detailCollectionBody">
           <div className={`detailHeader hasCover ${focusGroupId ? "focusOnly" : ""}`}>
             <div className="detailHeaderBar">
-            <Link className="miniBtn linkBtn" to="/trips">
+            <Link
+              className="miniBtn linkBtn"
+              to={trip?.type ? `/trips?category=${trip.type}` : "/trips"}
+            >
               ← Collections
             </Link>
             </div>
@@ -1389,49 +1556,19 @@ export default function TripDetail() {
             <div className="detailHeaderActions">
             <div className="detailToolbar">
               <div className="toolbarLeft">
-                <div
-                  className="segmentedControl"
-                  role="tablist"
-                  aria-label="View mode"
-                  onKeyDown={handleSegmentKey}
-                >
-                  <button
-                    className={`segmentedBtn ${viewMode === "list" ? "active" : ""}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode === "list"}
-                    onClick={() => setViewMode("list")}
-                  >
-                    <IconList className="segIcon" />
-                    <span>List</span>
-                  </button>
-                  <button
-                    className={`segmentedBtn ${viewMode === "compare" ? "active" : ""}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode === "compare"}
-                    onClick={() => hasItems && setViewMode("compare")}
-                    disabled={!hasItems}
-                  >
-                    <IconCompare className="segIcon" />
-                    <span>Compare</span>
-                  </button>
-                </div>
-
                 <div className={`sortRow inline ${focusGroupId ? "focusOnly" : ""}`}>
-                  <label className="sortLabel" htmlFor="sortItems">
-                    Sort
-                  </label>
-                  <select
+                  <Dropdown
                     id="sortItems"
-                    className="select sortSelect"
+                    className="sortDropdown"
                     value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value)}
-                  >
-                    <option value="newest">Newest first</option>
-                    <option value="oldest">Oldest first</option>
-                    <option value="notes">Notes first</option>
-                  </select>
+                    onChange={setSortMode}
+                    options={[
+                      { value: "newest", label: "Newest first" },
+                      { value: "oldest", label: "Oldest first" },
+                      { value: "notes", label: "Notes first" },
+                    ]}
+                    ariaLabel="Sort items"
+                  />
                 </div>
               </div>
 
@@ -1895,7 +2032,15 @@ export default function TripDetail() {
                       const domainLabel = item.domain || getDomain(item.airbnbUrl);
                       const tags = extractTags(item.note || "");
                       const mentions = extractMentions(item.note || "");
-                      const displayChips = [...titleParts.meta, ...metadataChips];
+                      const fallbackMeta =
+                        item.airbnbUrl && item.airbnbUrl.includes("airbnb.")
+                          ? extractAirbnbMetaFromTitle(item.title)
+                          : { rating: "", chips: [] };
+                      const displayChips = mergeMetaChips(
+                        titleParts.meta,
+                        metadataChips,
+                        fallbackMeta.chips
+                      );
                       const isStale = isStaleItem(item);
                       const action = normalizePrimaryAction(item.primaryAction);
                       const actionLabel = primaryActionLabel(action);
@@ -2053,13 +2198,6 @@ export default function TripDetail() {
 
               {compareEnabled && !compareMode && compareSelected.size >= 2 && (
                 <div className="compareBar">
-                  <button
-                    className="secondary-btn"
-                    type="button"
-                    onClick={() => setCompareMode(true)}
-                  >
-                    Compare ({compareSelected.size})
-                  </button>
                   <button className="secondary-btn" type="button" onClick={clearCompareSelection}>
                     Clear
                   </button>
@@ -2161,6 +2299,7 @@ export default function TripDetail() {
           </div>
         </div>
       )}
+      </AppShell>
     </div>
   );
 }

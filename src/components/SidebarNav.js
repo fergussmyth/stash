@@ -157,6 +157,7 @@ export default function SidebarNav({
 
       {onSelectSection && (
         <div className="sidebarSections">
+          <div className="sidebarDivider" aria-hidden="true" />
         <div className="sidebarSectionTitle">Stashes</div>
           <div className="sidebarSectionList">
             {SECTION_ITEMS.map((item) => (

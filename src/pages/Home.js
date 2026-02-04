@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
-import Dropdown from "../components/Dropdown";
 import { LoginForm } from "./Login";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
@@ -150,7 +149,7 @@ async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
 }
 
 export default function Home() {
-  const { trips, createTrip, addItemToTrip, user } = useTrips();
+  const { trips, createTrip, addItemToTrip, removeItem, user } = useTrips();
   const textareaRef = useRef(null);
   const navigate = useNavigate();
 
@@ -164,16 +163,20 @@ export default function Home() {
 
   // Trips UI
   const [selectedTripId, setSelectedTripId] = useState("");
-  const [newTripName, setNewTripName] = useState("");
   const [newTripType, setNewTripType] = useState("travel");
   const [savedMsg, setSavedMsg] = useState("");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [linksFound, setLinksFound] = useState(0);
   const [lastSavedTripId, setLastSavedTripId] = useState("");
-  const [showNewStash, setShowNewStash] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingCreateRef = useRef(false);
+  const [autoExtractPending, setAutoExtractPending] = useState(false);
+  const [stashQuery, setStashQuery] = useState("");
+  const [stashOpen, setStashOpen] = useState(false);
+  const [stashFocusArmed, setStashFocusArmed] = useState(false);
+  const stashWrapRef = useRef(null);
+  const stashInputRef = useRef(null);
 
   const pendingTripKey = "pending_trip_create_name";
   const pendingTripTypeKey = "pending_trip_create_type";
@@ -193,7 +196,6 @@ export default function Home() {
         return;
       }
       setSelectedTripId(id);
-      setNewTripName("");
       setNewTripType("travel");
       setSavedMsg("Stash created.");
       setTimeout(() => setSavedMsg(""), 1200);
@@ -212,6 +214,33 @@ export default function Home() {
     if (!textareaRef.current) return;
     textareaRef.current.focus();
   }, []);
+
+  useEffect(() => {
+    function handleClick(event) {
+      if (!stashWrapRef.current) return;
+      if (stashWrapRef.current.contains(event.target)) return;
+      setStashOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (!stashOpen) return;
+    if (!stashWrapRef.current) return;
+    const el = stashWrapRef.current;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [stashOpen]);
+
+  useEffect(() => {
+    if (!autoExtractPending) return;
+    if (!comment.trim()) return;
+    extractLinks();
+    setAutoExtractPending(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoExtractPending, comment]);
 
   // Bulk extraction state
   const [bulkLinks, setBulkLinks] = useState([]); // [{ id, cleaned, original, valid }]
@@ -236,6 +265,53 @@ export default function Home() {
       (selectedTrip.items || []).map((item) => cleanUrl(item.url || item.airbnbUrl))
     );
   }, [selectedTrip]);
+  const hasPreviewItems = !!link || bulkLinks.length > 0;
+  const previewCount = link ? 1 : bulkLinks.length;
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [showAllPreview, setShowAllPreview] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(true);
+  const recentItems = useMemo(() => {
+    const items = trips.flatMap((trip) =>
+      (trip.items || []).map((item) => ({
+        ...item,
+        tripId: trip.id,
+        tripName: trip.name,
+      }))
+    );
+    return items
+      .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+      .slice(0, 5);
+  }, [trips]);
+
+  useEffect(() => {
+    if (hasPreviewItems) {
+      setPreviewOpen(true);
+    } else {
+      setPreviewOpen(false);
+    }
+    setShowAllPreview(false);
+  }, [hasPreviewItems]);
+
+  async function handleShareItem(item) {
+    if (!item?.url) return;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(item.url);
+      setToastMsg("Copied link");
+      setTimeout(() => setToastMsg(""), 1400);
+    }
+  }
+  const filteredTrips = useMemo(() => {
+    const query = stashQuery.trim().toLowerCase();
+    if (!query) return tripsForSelect;
+    return tripsForSelect.filter((trip) =>
+      (trip.name || "").toLowerCase().includes(query)
+    );
+  }, [stashQuery, tripsForSelect]);
+  const exactMatchTrip = useMemo(() => {
+    const query = stashQuery.trim().toLowerCase();
+    if (!query) return null;
+    return tripsForSelect.find((trip) => (trip.name || "").toLowerCase() === query) || null;
+  }, [stashQuery, tripsForSelect]);
 
   function resetAll() {
     setComment("");
@@ -251,63 +327,53 @@ export default function Home() {
     setLastSavedTripId("");
   }
 
+  function clearSinglePreview() {
+    setLink("");
+    setLinkMeta(null);
+    setLinksFound(0);
+    setHasAttempted(false);
+  }
+
   async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText();
       setComment(text);
+      setAutoExtractPending(true);
     } catch {
       setWarning("Clipboard access was blocked by your browser.");
     }
   }
 
-  async function handleCreateTrip() {
-    const trimmed = (newTripName || "").trim();
-    if (!trimmed) {
-      setError("Enter a stash name.");
-      return;
-    }
+  async function createTripFromName(name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return null;
     if (!user) {
       sessionStorage.setItem(pendingTripKey, trimmed);
       sessionStorage.setItem(pendingTripTypeKey, newTripType);
       setShowAuthPrompt(true);
-      return;
+      return null;
     }
-    const id = await createTrip(newTripName, newTripType);
-    if (!id) return;
+    const id = await createTrip(trimmed, newTripType);
+    if (!id) return null;
     setSelectedTripId(id);
-    setNewTripName("");
     setNewTripType("travel");
     setSavedMsg("Stash created.");
     setTimeout(() => setSavedMsg(""), 1200);
-    setShowNewStash(false);
-
-    if (link) {
-      await saveSingleToTrip(id);
-    } else if (bulkLinks.length > 1) {
-      saveBulkToTrip(id);
-    }
+    setStashQuery(trimmed);
+    return id;
   }
 
-  function toggleSelected(id) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  function removeBulkItem(id) {
+    setBulkLinks((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      setLinksFound(next.length);
       return next;
     });
-  }
-
-  function selectAll() {
-    const all = new Set(
-      bulkLinks
-        .filter((x) => x.valid && !x.duplicate)
-        .map((x) => x.id)
-    );
-    setSelectedIds(all);
-  }
-
-  function clearSelection() {
-    setSelectedIds(new Set());
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
   function saveBulkToTrip(tripIdOverride = "") {
@@ -373,36 +439,6 @@ export default function Home() {
     });
   }
 
-  // This keeps your single-link verification (Airbnb often blocks it),
-  // but bulk mode will NOT verify each link.
-  async function verifyAndMaybeRedirectSingle(cleaned) {
-    if (!cleaned.includes("airbnb.")) return true;
-    try {
-      const res = await fetch("/check-airbnb", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: cleaned }),
-      });
-
-      const data = await res.json();
-      console.log("check-airbnb response:", data);
-
-      if (data.exists === false) {
-        setError("No listing was found for this Airbnb link.");
-        return false;
-      }
-
-      if (data.exists === null) {
-        setWarning("Airbnb blocked verification — opened anyway if enabled.");
-      }
-
-      return true;
-    } catch {
-      setWarning("Couldn’t verify right now — opened anyway if enabled.");
-      return true; // allow opening anyway if enabled
-    }
-  }
-
   async function extractLinks() {
     setError("");
     setWarning("");
@@ -466,10 +502,6 @@ export default function Home() {
 
       setLink(single.cleaned);
       setLinkMeta(single);
-
-      // verify single (best effort)
-      const ok = await verifyAndMaybeRedirectSingle(single.cleaned);
-      if (!ok) return;
 
       if (autoRedirect) {
         window.open(single.cleaned, "_blank");
@@ -550,8 +582,13 @@ export default function Home() {
         }
         topbar={
           <TopBar
-            title="Ready to stash"
-            subtitle="Paste links and stash them in seconds."
+            title={
+              <>
+                <img className="homeTopbarLogo" src={stashLogo} alt="Stash" />
+                <span className="homeTopbarWord">Stash</span>
+              </>
+            }
+            subtitle=""
             searchValue=""
             onSearchChange={() => {}}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
@@ -575,237 +612,385 @@ export default function Home() {
       >
         {toastMsg && <div className="toast">{toastMsg}</div>}
 
-        <div className="homeGrid">
-          <section className="panel p-5 homeCard">
+        <div className="homeCenter">
+          <div className="homeHero">
+            <h1>Ready to stash</h1>
+            <p>Paste links and stash them in seconds.</p>
+          </div>
+          {(warning || error) && (
+            <div className={`homeAlert ${error ? "error" : "warning"}`}>
+              <span className="homeAlertIcon" aria-hidden="true">
+                ℹ
+              </span>
+              <span>{error || warning}</span>
+            </div>
+          )}
+
+          <section className="homeWorkspace">
             <div className="panelHeader">
-              <h2>Quick stash</h2>
+              <h2 className="panelHeaderTitle">Quick stash</h2>
               <p>Paste a link, text, or anything to stash.</p>
             </div>
 
-            <textarea
-              ref={textareaRef}
-              className="input textarea dropzone homeTextarea"
-              placeholder="Paste a link, text, or anything you want to stash..."
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  extractLinks();
-                }
-              }}
-            />
+            <div className="homeInputCard">
+              <textarea
+                ref={textareaRef}
+                className="input textarea dropzone homeTextarea"
+                placeholder="Paste a link, text, or anything you want to stash..."
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                onPaste={() => setAutoExtractPending(true)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    extractLinks();
+                  }
+                }}
+              />
 
-            <div className="homeHintRow">
-              <div className="hint">Tip: paste multiple links at once.</div>
-              <div className="keyHint">Ctrl/Cmd + Enter</div>
-            </div>
-
-            {!link && bulkLinks.length === 0 && (
-              <div className="primaryRow">
-                <button className="primary-btn homePrimaryBtn" onClick={extractLinks}>
-                  Stash
-                </button>
-              </div>
-            )}
-
-            {linksFound > 0 && (
-              <div className="extractCount">
-                {linksFound} link{linksFound === 1 ? "" : "s"} ready to stash
-              </div>
-            )}
-
-            <div className="homePrefs">
-              <div className="optionsLabel">Preferences</div>
-              <div className="optionsActions">
-                <button type="button" className="miniBtn subtle" onClick={pasteFromClipboard}>
-                  From Clipboard
-                </button>
-                <label className="miniToggle">
-                  <span>Auto-open</span>
-                  <span className="switch">
-                    <input
-                      type="checkbox"
-                      checked={autoRedirect}
-                      onChange={() => setAutoRedirect(!autoRedirect)}
-                    />
-                    <span className="slider" />
-                  </span>
-                </label>
+              <div className="homeHintRow">
+                <div className="hint">Tip: paste multiple links at once.</div>
+                <div className="keyHint">Ctrl/Cmd + Enter</div>
               </div>
             </div>
 
-            {hasAttempted && !link && bulkLinks.length === 0 && (
-              <div className="actions single">
-                <div className="emptyNote">Nothing to stash yet.</div>
-                <button className="secondary-btn" onClick={resetAll}>
-                  Clear
-                </button>
-              </div>
-            )}
-
-            {error && <p className="error">✕ {error}</p>}
-            {warning && !error && <p className="warning">{warning}</p>}
-          </section>
-
-          <section className="panel p-5 homeCard">
-            <div className="panelHeader">
-              <h2>Preview</h2>
-              <p>Extracted items ready to stash.</p>
-            </div>
-
-            {!link && bulkLinks.length === 0 && (
-              <div className="homeEmptyState">Paste something to see what will be saved.</div>
-            )}
-
-            {link && (
-              <div className="previewPanel">
-                <div className="previewHeader">
-                  <div className="previewTitleRow">
-                    <p className="previewTitle">Ready to stash</p>
-                  </div>
-                  <button className="tertiary-btn" onClick={resetAll}>
-                    Clear
-                  </button>
-                </div>
-                {linkMeta?.domain && <span className="domainPill">{linkMeta.domain}</span>}
-                <a className="urlPreview urlPreviewLink" href={link} target="_blank" rel="noreferrer">
-                  {link}
-                </a>
-              </div>
-            )}
-
-            {bulkLinks.length > 1 && (
-              <div className="previewPanel">
-                <div className="previewHeader">
-                  <div>
-                    <p className="previewTitle">Links ready</p>
-                    <span className="previewStatus">{bulkLinks.length} ready</span>
-                  </div>
-                </div>
-
-                <div className="bulkActions">
-                  <button className="miniBtn" onClick={selectAll}>
-                    Select all
-                  </button>
-                  <button className="miniBtn" onClick={clearSelection}>
-                    Clear selection
-                  </button>
-                  <button className="miniBtn danger" onClick={resetAll}>
-                    Clear all
-                  </button>
-                </div>
-
-                <div className="bulkList">
-                  {bulkLinks.map((x) => (
-                    <div
-                      key={x.id}
-                      className={`bulkItem ${x.valid ? "" : "invalid"} ${
-                        x.duplicate ? "duplicate" : ""
-                      }`}
-                    >
-                      <label className="bulkLeft">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(x.id)}
-                          disabled={!x.valid || x.duplicate}
-                          onChange={() => toggleSelected(x.id)}
-                        />
-                        <span className="bulkText">
-                          <span className="bulkCleaned">{x.cleaned}</span>
-                          {x.original !== x.cleaned && (
-                            <span className="bulkOriginal">Original: {x.original}</span>
-                          )}
-                          {!x.valid && <span className="bulkBadge">Invalid</span>}
-                          {x.duplicate && (
-                            <span className="bulkBadge duplicate">Already stashed</span>
-                          )}
-                        </span>
-                      </label>
-
-                      <a className="miniBtn linkBtn" href={x.cleaned} target="_blank" rel="noreferrer">
-                        Open
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(link || bulkLinks.length > 1) && (
-              <div className="savePanel">
-                <div className="saveRowInline">
+            {hasPreviewItems && (
+              <div className="stashBar">
+                <div className="stashBarRow">
                   <span className="saveLabel">Stash in</span>
-                  <Dropdown
-                    className="stashDropdown"
-                    value={selectedTripId}
-                    onChange={(nextId) => setSelectedTripId(nextId)}
-                    options={[
-                      { value: "", label: "Choose a stash" },
-                      ...tripsForSelect.map((t) => ({
-                        value: t.id,
-                        label: `${t.name} (${t.items.length})`,
-                      })),
-                    ]}
-                    ariaLabel="Choose a stash"
-                  />
+                  <div ref={stashWrapRef} className="stashCombo">
+                    <input
+                      ref={stashInputRef}
+                      className="stashComboInput"
+                      type="text"
+                      placeholder="Choose a stash"
+                      value={stashQuery}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setStashQuery(next);
+                        setStashOpen(true);
+                        setStashFocusArmed(true);
+                        if (!next.trim()) {
+                          setSelectedTripId("");
+                          return;
+                        }
+                        const match = tripsForSelect.find(
+                          (trip) => (trip.name || "").toLowerCase() === next.trim().toLowerCase()
+                        );
+                        setSelectedTripId(match ? match.id : "");
+                      }}
+                      onPointerDown={(event) => {
+                        if (!stashFocusArmed) {
+                          event.preventDefault();
+                          setStashOpen(true);
+                          setStashFocusArmed(true);
+                        }
+                      }}
+                      onFocus={() => {
+                        setStashOpen(true);
+                        setStashFocusArmed(true);
+                      }}
+                      onBlur={() => setStashFocusArmed(false)}
+                    />
+                    {stashOpen && (
+                      <div className="stashComboMenu" role="listbox">
+                        {filteredTrips.length === 0 && !stashQuery.trim() && (
+                          <div className="stashComboEmpty">No stashes yet.</div>
+                        )}
+                        {filteredTrips.map((trip) => (
+                          <button
+                            key={trip.id}
+                            className="stashComboItem"
+                            type="button"
+                            onClick={() => {
+                              setSelectedTripId(trip.id);
+                              setStashQuery(trip.name || "");
+                              setStashOpen(false);
+                            }}
+                          >
+                            <span>{trip.name}</span>
+                            <span className="stashComboMeta">{trip.items.length} links</span>
+                          </button>
+                        ))}
+                        {stashQuery.trim() && !exactMatchTrip && (
+                          <button
+                            className="stashComboItem stashComboCreate"
+                            type="button"
+                            onClick={async () => {
+                              const createdId = await createTripFromName(stashQuery);
+                              if (createdId) {
+                                setSelectedTripId(createdId);
+                                setStashOpen(false);
+                              }
+                            }}
+                          >
+                            Create "{stashQuery.trim()}"
+                          </button>
+                        )}
+                        <div className="stashComboDivider" />
+                        <button
+                          className="stashComboItem stashComboCreate"
+                          type="button"
+                          onClick={() => {
+                            setStashQuery("");
+                            setStashOpen(true);
+                            setStashFocusArmed(true);
+                            setTimeout(() => stashInputRef.current?.focus(), 0);
+                          }}
+                        >
+                          + Create new stash...
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button
-                    className="primary-btn btnCompact"
-                    onClick={() => {
+                    className="primary-btn btnCompact homePrimaryBtn"
+                    onClick={async () => {
+                      let targetId = selectedTripId;
+                      if (!targetId && stashQuery.trim()) {
+                        targetId = await createTripFromName(stashQuery.trim());
+                      }
+                      if (!targetId) return;
                       if (link) {
-                        setLastSavedTripId(selectedTripId);
-                        saveSingleToTrip();
+                        setLastSavedTripId(targetId);
+                        await saveSingleToTrip(targetId);
                       } else {
-                        saveBulkToTrip();
+                        saveBulkToTrip(targetId);
                       }
                     }}
-                    disabled={!selectedTripId}
+                    disabled={!selectedTripId && !stashQuery.trim()}
                   >
                     Stash
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  className="miniBtn subtle newStashToggle"
-                  onClick={() => setShowNewStash((prev) => !prev)}
-                >
-                  {showNewStash ? "Hide new stash" : "+ New stash"}
-                </button>
-
-                {showNewStash && (
-                  <form
-                    className="newStashForm"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      handleCreateTrip();
-                    }}
-                  >
-                    <input
-                      className="input small"
-                      placeholder="New stash name (e.g. Barcelona July)"
-                      value={newTripName}
-                      onChange={(e) => setNewTripName(e.target.value)}
-                    />
-                    <select
-                      className="select small"
-                      value={newTripType}
-                      onChange={(e) => setNewTripType(e.target.value)}
-                      aria-label="Stash type"
-                    >
-                      <option value="general">General</option>
-                      <option value="travel">Travel</option>
-                      <option value="fashion">Fashion</option>
-                    </select>
-                    <button className="secondary-btn btnCompact" type="submit">
-                      Create & stash
-                    </button>
-                  </form>
-                )}
-
                 {savedMsg && <div className="savedMsg">{savedMsg}</div>}
               </div>
             )}
+
+            <div className="homeSettingsCard">
+              <div className="homePrefs">
+                <div className="optionsLabel">Preferences</div>
+                <button
+                  className="prefsToggle"
+                  type="button"
+                  onClick={() => setPrefsOpen((prev) => !prev)}
+                  aria-expanded={prefsOpen}
+                >
+                  Settings
+                  <span className={`prefsChevron ${prefsOpen ? "open" : ""}`} aria-hidden="true" />
+                </button>
+                {prefsOpen && (
+                  <div className="prefsList">
+                    <button
+                      type="button"
+                      className="prefsRow"
+                      onClick={pasteFromClipboard}
+                    >
+                      <span>From Clipboard</span>
+                      <span className="prefsAction">Paste</span>
+                    </button>
+                    <label className="prefsRow">
+                      <span>Auto-open</span>
+                      <span className="switch">
+                        <input
+                          type="checkbox"
+                          checked={autoRedirect}
+                          onChange={() => setAutoRedirect(!autoRedirect)}
+                        />
+                        <span className="slider" />
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="previewSection">
+                <button
+                  className="previewToggle"
+                  type="button"
+                  onClick={() => setPreviewOpen((prev) => !prev)}
+                  aria-expanded={previewOpen}
+                >
+                  <span className="previewToggleText">Preview ({previewCount})</span>
+                  <span
+                    className={`previewChevron ${previewOpen ? "open" : ""}`}
+                    aria-hidden="true"
+                  />
+                </button>
+                {previewOpen && (
+                  <div className="previewBody">
+                    {!hasPreviewItems ? (
+                      <div className="previewEmpty">Staging area empty</div>
+                    ) : (
+                      <>
+                        <div
+                          className={`previewRibbonScroll ${
+                            showAllPreview ? "showAll" : "previewLimit"
+                          }`}
+                        >
+                          {link && (
+                            <div className="previewPill">
+                              <div className="previewPillIcon">
+                                {linkMeta?.domain && (
+                                  <img
+                                    src={`https://www.google.com/s2/favicons?domain=${linkMeta.domain}&sz=64`}
+                                    alt=""
+                                  />
+                                )}
+                              </div>
+                              <div className="previewPillText">
+                                {linkMeta?.domain || "Listing"}
+                              </div>
+                              <button
+                                className="previewPillRemove"
+                                type="button"
+                                onClick={clearSinglePreview}
+                                aria-label="Remove item"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          )}
+                          {bulkLinks.map((x) => (
+                            <div
+                              key={x.id}
+                              className={`previewPill ${x.valid ? "" : "invalid"} ${
+                                x.duplicate ? "duplicate" : ""
+                              }`}
+                            >
+                              <div className="previewPillIcon">
+                                {x.domain && (
+                                  <img
+                                    src={`https://www.google.com/s2/favicons?domain=${x.domain}&sz=64`}
+                                    alt=""
+                                  />
+                                )}
+                              </div>
+                              <div className="previewPillText">{x.domain || "Link"}</div>
+                              <button
+                                className="previewPillRemove"
+                                type="button"
+                                onClick={() => removeBulkItem(x.id)}
+                                aria-label="Remove item"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        {previewCount > 3 && (
+                          <button
+                            className="previewShowAll"
+                            type="button"
+                            onClick={() => setShowAllPreview((prev) => !prev)}
+                          >
+                            {showAllPreview ? "Show less" : "Show all"}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="homeRecent">
+              <div className="homeRecentLabel">
+                Recently stashed ({recentItems.length})
+              </div>
+              <div className="homeRecentList">
+                {recentItems.length === 0 ? (
+                  <div className="homeRecentEmpty">No recent items yet.</div>
+                ) : (
+                  recentItems.map((item) => (
+                    <div key={item.id} className="homeRecentItem">
+                      <div className="homeRecentIcon">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L10.5 4.43"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 1 0 7.07 7.07L13.5 19.57"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </div>
+                      <div className="homeRecentMeta">
+                        <div className="homeRecentTitle">
+                          {item.title || item.domain || "Stashed link"}
+                        </div>
+                        <div className="homeRecentSub">
+                          {item.url || item.originalUrl || item.domain || "—"}
+                        </div>
+                      </div>
+                      <div className="homeRecentActions">
+                        <button
+                          type="button"
+                          className="homeRecentAction"
+                          onClick={() => handleShareItem(item)}
+                          aria-label="Share"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M15 8a3 3 0 1 0-2.83-4H9.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                            <path
+                              d="M15 8H9.5a3.5 3.5 0 0 0 0 7H15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="homeRecentAction danger"
+                          onClick={() => removeItem(item.tripId, item.id)}
+                          aria-label="Delete"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M3 6h18"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                            <path
+                              d="M8 6V4h8v2"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                            <path
+                              d="M6 6l1 14h10l1-14"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </section>
         </div>
       </AppShell>

@@ -1,3 +1,6 @@
+import { Link } from "react-router-dom";
+import menuIcon from "../assets/icons/menu.png";
+
 export default function TopBar({
   title,
   subtitle,
@@ -15,13 +18,15 @@ export default function TopBar({
           aria-label="Open navigation"
           onClick={onToggleSidebar}
         >
-          <span />
-          <span />
-          <span />
+          <img className="sidebarToggleIcon" src={menuIcon} alt="" aria-hidden="true" />
         </button>
         <div className="collectionsTopbarTitles">
-          <div className="collectionsTopbarTitle">{title}</div>
-          <div className="collectionsTopbarSubtitle">{subtitle}</div>
+          <div className="collectionsTopbarTitle">
+            <Link className="topbarHomeLink" to="/">
+              {title}
+            </Link>
+          </div>
+          {subtitle ? <div className="collectionsTopbarSubtitle">{subtitle}</div> : null}
         </div>
       </div>
 

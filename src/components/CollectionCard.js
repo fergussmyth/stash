@@ -48,7 +48,9 @@ export default function CollectionCard({
     : fallbackGradient;
   return (
     <div
-      className={`collectionCard ${trip.pinned ? "pinned" : ""}`}
+      className={`collectionCard ${trip.pinned ? "pinned" : ""} ${
+        menuOpen ? "menuOpen" : ""
+      }`}
       role="button"
       tabIndex={0}
       onClick={() => {
@@ -96,11 +98,40 @@ export default function CollectionCard({
               }}
             />
             <div className="tripRenameActions">
-              <button className="miniBtn" type="button" onClick={onRenameSave}>
-                Save
+              <button
+                className="tripRenameIcon save"
+                type="button"
+                onClick={onRenameSave}
+                title="Save name"
+                aria-label="Save name"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M5 12l4 4 10-10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </button>
-              <button className="miniBtn" type="button" onClick={onRenameCancel}>
-                Cancel
+              <button
+                className="tripRenameIcon cancel"
+                type="button"
+                onClick={onRenameCancel}
+                title="Cancel changes"
+                aria-label="Cancel changes"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M6 6l12 12M18 6l-12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
               </button>
             </div>
           </div>
@@ -109,28 +140,44 @@ export default function CollectionCard({
             <div className="tripHeaderMain">
               <div className="tripName">{trip.name}</div>
             </div>
-            <div className="tripMenuWrap" onClick={(event) => event.stopPropagation()}>
-              <button
-                className="tripMenuBtn"
-                type="button"
-                aria-label="Collection options"
-                onClick={onToggleMenu}
-              >
-                ⋮
-              </button>
-              {menuOpen && (
-                <div className="tripMenu" role="menu">
-                  <button className="tripMenuItem" type="button" onClick={onShare}>
-                    Share
-                  </button>
-                  <button className="tripMenuItem" type="button" onClick={onTogglePin}>
-                    {trip.pinned ? "Unpin" : "Pin"}
-                  </button>
-                  <button className="tripMenuItem danger" type="button" onClick={onDelete}>
-                    Delete
-                  </button>
-                </div>
-              )}
+            <div className="tripHeaderActions">
+              <div className="tripQuickActions" role="group" aria-label="Quick actions">
+                <button
+                  className="iconBtn bare quickActionBtn"
+                  type="button"
+                  aria-label="Edit collection"
+                  title="Edit"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartRename();
+                  }}
+                >
+                  <IconEdit className="quickActionIcon" />
+                </button>
+              </div>
+              <div className="tripMenuWrap" onClick={(event) => event.stopPropagation()}>
+                <button
+                  className="tripMenuBtn"
+                  type="button"
+                  aria-label="Collection options"
+                  onClick={onToggleMenu}
+                >
+                  ⋮
+                </button>
+                {menuOpen && (
+                  <div className="tripMenu" role="menu">
+                    <button className="tripMenuItem" type="button" onClick={onStartRename}>
+                      Edit
+                    </button>
+                    <button className="tripMenuItem" type="button" onClick={onShare}>
+                      Share
+                    </button>
+                    <button className="tripMenuItem danger" type="button" onClick={onDelete}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -154,44 +201,6 @@ export default function CollectionCard({
           </button>
         )}
 
-        <div className="tripQuickActions" role="group" aria-label="Quick actions">
-          <button
-            className="iconBtn bare quickActionBtn"
-            type="button"
-            aria-label="Open collection"
-            title="Open"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpen();
-            }}
-          >
-            <IconExternal className="quickActionIcon" />
-          </button>
-          <button
-            className="iconBtn bare quickActionBtn"
-            type="button"
-            aria-label="Rename collection"
-            title="Rename"
-            onClick={(event) => {
-              event.stopPropagation();
-              onStartRename();
-            }}
-          >
-            <IconEdit className="quickActionIcon" />
-          </button>
-          <button
-            className="iconBtn bare quickActionBtn danger"
-            type="button"
-            aria-label="Delete collection"
-            title="Delete"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete();
-            }}
-          >
-            <IconTrash className="quickActionIcon" />
-          </button>
-        </div>
       </div>
     </div>
   );
