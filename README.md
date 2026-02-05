@@ -16,7 +16,7 @@ A clean way to save links while you browse.
 ## Chrome extension (start here)
 Stash lives in the browser so you can save a page the moment you see it.
 
-![extension showcase]](image.png)
+![extension showcase](image.png)
 
 ## Run locally
 From the project root:
