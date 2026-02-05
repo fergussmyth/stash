@@ -11,7 +11,7 @@ import userIcon from "../assets/icons/user.png";
 
 export default function Profile() {
   const { user, loading, softLogout, clearRememberedProfile } = useAuth();
-  const { trips } = useTrips();
+  const { trips, renameTrip, deleteTrip } = useTrips();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -34,6 +34,22 @@ export default function Profile() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileInputRef = useRef(null);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [shareMenuOpenId, setShareMenuOpenId] = useState("");
+  const [copiedTripId, setCopiedTripId] = useState("");
+  const [editingSharedTripId, setEditingSharedTripId] = useState("");
+  const [editingSharedTripName, setEditingSharedTripName] = useState("");
+  const [cropSrc, setCropSrc] = useState("");
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropMinZoom, setCropMinZoom] = useState(0.2);
+  const [cropMaxZoom, setCropMaxZoom] = useState(4);
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
+  const [cropNatural, setCropNatural] = useState({ w: 0, h: 0 });
+  const [isCropping, setIsCropping] = useState(false);
+  const cropImgRef = useRef(null);
+  const dragStateRef = useRef(null);
+  const cropFrameRef = useRef(null);
+  const [cropFrameSize, setCropFrameSize] = useState(240);
+  const outputSize = 512;
   const rememberMeEnabled =
     typeof window !== "undefined" && window.localStorage.getItem("stashRememberMe") === "true";
 
@@ -82,6 +98,40 @@ export default function Profile() {
     };
   }, [loading, user, navigate]);
 
+  useEffect(() => {
+    if (!isCropping) return;
+    const measure = () => {
+      if (!cropFrameRef.current) return;
+      const rect = cropFrameRef.current.getBoundingClientRect();
+      if (rect.width) {
+        setCropFrameSize(rect.width);
+        if (cropNatural.w && cropNatural.h) {
+          setCropMinZoom(0.2);
+          setCropMaxZoom(4);
+          setCropZoom((prev) => {
+            const nextZoom = Math.max(0.2, prev);
+            setCropOffset((prevOffset) => clampCropOffset(prevOffset, nextZoom));
+            return nextZoom;
+          });
+        }
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [isCropping, cropNatural.w, cropNatural.h]);
+
+  useEffect(() => {
+    function handleDocumentClick(event) {
+      const target = event.target;
+      if (target && target.closest(".profileCollectionMenuWrap")) return;
+      setShareMenuOpenId("");
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, []);
+
   async function handleSave() {
     if (!user) return;
     setSaving(true);
@@ -95,29 +145,104 @@ export default function Profile() {
       return;
     }
     setStatus("Saved.");
+    if (rememberMeEnabled && typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem("stashRememberedProfile");
+        const remembered = raw ? JSON.parse(raw) : null;
+        if (remembered) {
+          const updated = { ...remembered, name: displayName || remembered.name };
+          window.localStorage.setItem("stashRememberedProfile", JSON.stringify(updated));
+        }
+      } catch (err) {
+        // ignore invalid remembered profile payload
+      }
+    }
     setTimeout(() => setStatus(""), 1500);
   }
 
-  async function handleAvatarChange(event) {
+  function handleAvatarChange(event) {
     const file = event.target.files?.[0];
     if (!file || !user) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropSrc(String(reader.result || ""));
+      setCropZoom(1);
+      setCropMinZoom(0.2);
+      setCropMaxZoom(4);
+      setCropOffset({ x: 0, y: 0 });
+      setCropNatural({ w: 0, h: 0 });
+      setIsCropping(true);
+      setShowAvatarMenu(false);
+    };
+    reader.readAsDataURL(file);
+  }
 
+  function clampCropOffset(nextOffset, zoomValue = cropZoom) {
+    const { w, h } = cropNatural;
+    if (!w || !h) return nextOffset;
+    const scale = zoomValue;
+    const maxX = Math.max(0, Math.abs(w * scale - cropFrameSize) / 2);
+    const maxY = Math.max(0, Math.abs(h * scale - cropFrameSize) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, nextOffset.x)),
+      y: Math.max(-maxY, Math.min(maxY, nextOffset.y)),
+    };
+  }
+
+  async function handleCropSave() {
+    if (!user || !cropSrc || !cropImgRef.current) return;
     setUploadingAvatar(true);
     setToastMsg("");
-    setShowAvatarMenu(false);
-
     try {
-      const fileExt = file.name.split(".").pop() || "png";
-      const filePath = `${user.id}/${Date.now()}.${fileExt}`;
+      const { w, h } = cropNatural;
+      const scale = cropZoom;
+      const scaledW = w * scale;
+      const scaledH = h * scale;
+      const centerX = cropFrameSize / 2 + cropOffset.x;
+      const centerY = cropFrameSize / 2 + cropOffset.y;
+      const imgLeft = centerX - scaledW / 2;
+      const imgTop = centerY - scaledH / 2;
 
+      const canvas = document.createElement("canvas");
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas unavailable");
+      ctx.imageSmoothingQuality = "high";
+      const outScale = outputSize / cropFrameSize;
+      const coverScale = Math.max(outputSize / w, outputSize / h);
+      const coverW = w * coverScale;
+      const coverH = h * coverScale;
+      ctx.filter = "blur(14px)";
+      ctx.drawImage(
+        cropImgRef.current,
+        (outputSize - coverW) / 2,
+        (outputSize - coverH) / 2,
+        coverW,
+        coverH
+      );
+      ctx.filter = "none";
+      ctx.drawImage(
+        cropImgRef.current,
+        imgLeft * outScale,
+        imgTop * outScale,
+        scaledW * outScale,
+        scaledH * outScale
+      );
+
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png", 0.92)
+      );
+      if (!blob) throw new Error("Could not process image");
+
+      const filePath = `${user.id}/${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage
         .from("avatars")
-        .upload(filePath, file, {
+        .upload(filePath, blob, {
           upsert: true,
-          contentType: file.type,
+          contentType: "image/png",
           cacheControl: "3600",
         });
-
       if (uploadError) {
         setToastMsg("Could not upload photo.");
         return;
@@ -125,25 +250,38 @@ export default function Profile() {
 
       const { data: publicData } = supabase.storage.from("avatars").getPublicUrl(filePath);
       const publicUrl = publicData?.publicUrl;
-
       if (!publicUrl) {
         setToastMsg("Could not fetch photo URL.");
         return;
       }
+      const versionedUrl = `${publicUrl}?v=${Date.now()}`;
 
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({ avatar_url: publicUrl })
+        .update({ avatar_url: versionedUrl })
         .eq("id", user.id);
-
       if (updateError) {
         setToastMsg("Could not save photo.");
         return;
       }
 
-      setAvatarUrl(publicUrl);
+      setAvatarUrl(versionedUrl);
+      if (rememberMeEnabled && typeof window !== "undefined") {
+        try {
+          const raw = window.localStorage.getItem("stashRememberedProfile");
+          const remembered = raw ? JSON.parse(raw) : null;
+          if (remembered) {
+            const updated = { ...remembered, avatar_url: versionedUrl };
+            window.localStorage.setItem("stashRememberedProfile", JSON.stringify(updated));
+          }
+        } catch (err) {
+          // ignore invalid remembered profile payload
+        }
+      }
       setToastMsg("Photo updated");
       setTimeout(() => setToastMsg(""), 1500);
+      setIsCropping(false);
+      setCropSrc("");
     } finally {
       setUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -194,12 +332,14 @@ export default function Profile() {
       await navigator.clipboard.writeText(shareUrl);
       setSharedCopyMsg("Copied link");
       setToastMsg("Copied");
+      setCopiedTripId(trip.id);
       setTimeout(() => setSharedCopyMsg(""), 1500);
       setTimeout(() => setToastMsg(""), 1500);
+      setTimeout(() => setCopiedTripId(""), 1500);
     }
   }
 
-  async function handleRevokeShare(trip) {
+  async function handleUnshareShare(trip) {
     const { error } = await supabase
       .from("trips")
       .update({ is_shared: false, share_id: null })
@@ -211,6 +351,35 @@ export default function Profile() {
     }
     setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
     setToastMsg("Share revoked");
+    setTimeout(() => setToastMsg(""), 1500);
+  }
+
+  async function handleRenameShareSave(trip) {
+    const trimmed = (editingSharedTripName || "").trim();
+    if (!trimmed) return;
+    await renameTrip(trip.id, trimmed);
+    setSharedTrips((prev) =>
+      prev.map((t) => (t.id === trip.id ? { ...t, name: trimmed } : t))
+    );
+    setEditingSharedTripId("");
+    setEditingSharedTripName("");
+    setToastMsg("Renamed");
+    setTimeout(() => setToastMsg(""), 1500);
+  }
+
+  function handleRenameShareCancel() {
+    setEditingSharedTripId("");
+    setEditingSharedTripName("");
+  }
+
+  async function handleDeleteShare(trip) {
+    const confirmed = window.confirm(
+      "Delete this collection? This permanently removes it and its links."
+    );
+    if (!confirmed) return;
+    await deleteTrip(trip.id);
+    setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
+    setToastMsg("Deleted");
     setTimeout(() => setToastMsg(""), 1500);
   }
 
@@ -498,6 +667,124 @@ export default function Profile() {
                 </div>
               </div>
             )}
+
+            {isCropping && (
+              <div
+                className="profilePhotoOverlay"
+                role="dialog"
+                aria-modal="true"
+                onClick={() => setIsCropping(false)}
+              >
+                <div
+                  className="profileCropModal"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="profilePhotoTitle">Crop your photo</div>
+                  <div
+                    className="profileCropFrame"
+                    ref={cropFrameRef}
+                    onPointerDown={(event) => {
+                      if (!cropSrc) return;
+                      event.preventDefault();
+                      dragStateRef.current = {
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        startOffset: { ...cropOffset },
+                      };
+                    }}
+                    onPointerMove={(event) => {
+                      if (!dragStateRef.current) return;
+                      event.preventDefault();
+                      const { startX, startY, startOffset } = dragStateRef.current;
+                      const nextOffset = {
+                        x: startOffset.x + (event.clientX - startX),
+                        y: startOffset.y + (event.clientY - startY),
+                      };
+                      setCropOffset(clampCropOffset(nextOffset));
+                    }}
+                    onPointerUp={() => {
+                      dragStateRef.current = null;
+                    }}
+                    onPointerLeave={() => {
+                      dragStateRef.current = null;
+                    }}
+                  >
+                    {cropSrc && (
+                      <>
+                        <img
+                          className="profileCropBg"
+                          src={cropSrc}
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <img
+                          ref={cropImgRef}
+                          className="profileCropImage"
+                          src={cropSrc}
+                          alt=""
+                          onLoad={(event) => {
+                            const { naturalWidth, naturalHeight } = event.target;
+                            const nextNatural = { w: naturalWidth, h: naturalHeight };
+                            setCropNatural(nextNatural);
+                          setCropMinZoom(0.2);
+                          setCropMaxZoom(4);
+                          setCropZoom(1);
+                          setCropOffset({ x: 0, y: 0 });
+                          }}
+                          style={{
+                            transform: (() => {
+                              const { w, h } = cropNatural;
+                              if (!w || !h) return "translate(-50%, -50%) scale(1)";
+                              const scale = cropZoom;
+                              return `translate(-50%, -50%) translate(${cropOffset.x}px, ${cropOffset.y}px) scale(${scale})`;
+                            })(),
+                          }}
+                        />
+                      </>
+                    )}
+                    <div className="profileCropMask" aria-hidden="true" />
+                    <div className="profileCropSafeRing" aria-hidden="true" />
+                  </div>
+                  <div className="profileCropHint">Move and zoom to fit</div>
+                  <div className="profileCropControls">
+                    <input
+                      className="profileCropSlider"
+                      type="range"
+                      min={cropMinZoom}
+                      max={cropMaxZoom}
+                      step="0.01"
+                      value={cropZoom}
+                      onChange={(event) => {
+                        const nextZoom = Number(event.target.value);
+                        setCropZoom(nextZoom);
+                        setCropOffset((prev) => clampCropOffset(prev, nextZoom));
+                      }}
+                    />
+                    <div className="profileCropActions">
+                      <button
+                        className="profilePhotoAction"
+                        type="button"
+                        onClick={() => {
+                          setIsCropping(false);
+                          setCropSrc("");
+                        }}
+                        disabled={uploadingAvatar}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="profilePhotoAction primary"
+                        type="button"
+                        onClick={handleCropSave}
+                        disabled={uploadingAvatar}
+                      >
+                        {uploadingAvatar ? "Saving..." : "Save photo"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="profileBlock">
@@ -626,61 +913,204 @@ export default function Profile() {
               {sharedCopyMsg && <div className="profileToast">{sharedCopyMsg}</div>}
             </div>
             {sharedTrips.length === 0 ? (
-              <div className="muted">No shared collections yet.</div>
+              <div className="sharedEmptyState">
+                <div className="sharedEmptyTitle">No shared collections yet</div>
+                <div className="sharedEmptyText">
+                  Share a collection to let others browse your links without editing anything.
+                </div>
+                <div className="sharedEmptyText">
+                  You control what’s shared and can unshare anytime.
+                </div>
+                <button
+                  className="sharedEmptyCta"
+                  type="button"
+                  onClick={() => navigate("/trips")}
+                >
+                  Share a collection
+                </button>
+              </div>
             ) : (
               <div className="profileTripList">
                 {sharedTrips.map((trip) => (
                   <div
                     key={trip.id}
-                    className="profileTripRow clickable"
+                    className="profileTripRow collection-card clickable"
                     role="button"
                     tabIndex={0}
-                    onClick={() => handleOpenTrip(trip)}
+                    onClick={() => {
+                      if (editingSharedTripId === trip.id) return;
+                      handleOpenTrip(trip);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
+                        if (editingSharedTripId === trip.id) return;
                         handleOpenTrip(trip);
                       }
                     }}
                   >
-                    <div className="profileTripMeta">
-                      <div className="profileTripName">{trip.name}</div>
-                      <div className="profileTripCount">
-                        {(trip.trip_items?.[0]?.count || 0)} links
+                    {editingSharedTripId === trip.id ? (
+                      <div className="tripRenameRow">
+                        <input
+                          className="input tripRenameInput"
+                          value={editingSharedTripName}
+                          onChange={(event) => setEditingSharedTripName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleRenameShareSave(trip);
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              handleRenameShareCancel();
+                            }
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                        <div className="tripRenameActions" onClick={(event) => event.stopPropagation()}>
+                          <button
+                            className="tripRenameIcon save"
+                            type="button"
+                            onClick={() => handleRenameShareSave(trip)}
+                            title="Save name"
+                            aria-label="Save name"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path
+                                d="M5 12l4 4 10-10"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            className="tripRenameIcon cancel"
+                            type="button"
+                            onClick={handleRenameShareCancel}
+                            title="Cancel changes"
+                            aria-label="Cancel changes"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path
+                                d="M6 6l12 12M18 6l-12 12"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="profileTripActions">
-                      <button
-                        className="miniBtn blue"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCopyShare(trip);
-                        }}
-                      >
-                        Copy link
-                      </button>
-                      <button
-                        className="miniBtn"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleRegenerateShare(trip);
-                        }}
-                      >
-                        Regenerate
-                      </button>
-                      <button
-                        className="miniBtn danger"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleRevokeShare(trip);
-                        }}
-                      >
-                        Revoke
-                      </button>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="card-info">
+                          <h3 className="card-title">{trip.name}</h3>
+                          <span className="card-subtitle">
+                            {(trip.trip_items?.[0]?.count || 0)} links
+                          </span>
+                        </div>
+                        <div className="card-actions">
+                          <button
+                            className={`btn-copy ${copiedTripId === trip.id ? "isCopied" : ""}`}
+                            type="button"
+                            aria-label="Copy link"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleCopyShare(trip);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path
+                                d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                            {copiedTripId === trip.id ? "Copied" : "Copy"}
+                          </button>
+                          <div
+                            className="profileCollectionMenuWrap"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              className="btn-more"
+                              type="button"
+                              aria-label="More options"
+                              onClick={() =>
+                                setShareMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
+                              }
+                            >
+                              ⋮
+                            </button>
+                            {shareMenuOpenId === trip.id && (
+                              <div className="collectionMenu" role="menu">
+                                <button
+                                  className="collectionMenuItem"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setEditingSharedTripId(trip.id);
+                                    setEditingSharedTripName(trip.name || "");
+                                    setShareMenuOpenId("");
+                                  }}
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  className="collectionMenuItem danger"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleUnshareShare(trip);
+                                    setShareMenuOpenId("");
+                                  }}
+                                >
+                                  Unshare
+                                </button>
+                                <button
+                                  className="collectionMenuItem danger"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleDeleteShare(trip);
+                                    setShareMenuOpenId("");
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <span className="card-chevron" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" focusable="false">
+                              <path
+                                d="M9 6l6 6-6 6"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

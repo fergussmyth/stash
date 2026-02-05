@@ -46,6 +46,12 @@ export default function CollectionCard({
   const coverBackground = isGradientCover
     ? coverImageUrl || fallbackGradient
     : fallbackGradient;
+  const decisionBadge =
+    trip.decisionStatus === "in_progress"
+      ? "In progress"
+      : trip.decisionStatus === "decided"
+      ? "Decided"
+      : "";
   return (
     <div
       className={`collectionCard ${trip.pinned ? "pinned" : ""} ${
@@ -138,7 +144,18 @@ export default function CollectionCard({
         ) : (
           <div className="tripHeaderTop">
             <div className="tripHeaderMain">
-              <div className="tripName">{trip.name}</div>
+              <div className="tripNameRow">
+                <div className="tripName">{trip.name}</div>
+                {decisionBadge && (
+                  <span
+                    className={`decisionBadge ${
+                      trip.decisionStatus === "decided" ? "decided" : "progress"
+                    }`}
+                  >
+                    {decisionBadge}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="tripHeaderActions">
               <div className="tripQuickActions" role="group" aria-label="Quick actions">

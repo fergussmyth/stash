@@ -18,6 +18,7 @@ function AppShell() {
   const location = useLocation();
   const {
     user,
+    loading,
     rememberedProfile,
     rememberCurrentUser,
     clearRememberedProfile,
@@ -39,7 +40,7 @@ function AppShell() {
     location.pathname === "/login" ||
     location.pathname.startsWith("/share/");
 
-  const showAuthGate = !user && !publicOnly;
+  const showAuthGate = !loading && !user && !publicOnly;
 
   useEffect(() => {
     if (!user || typeof window === "undefined") return;

@@ -1,3 +1,5 @@
+import MobileBottomNav from "./MobileBottomNav";
+
 export default function AppShell({
   sidebar,
   topbar,
@@ -28,6 +30,7 @@ export default function AppShell({
       >
         {sidebar}
       </aside>
+      <MobileBottomNav />
     </div>
   );
 }

@@ -134,6 +134,9 @@ export function TripsProvider({ children }) {
         lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
         decisionGroupId: item.decision_group_id || null,
         chosen: !!item.chosen,
+        decisionState: item.decision_state || "active",
+        ruledOutAt: item.ruled_out_at ? new Date(item.ruled_out_at).getTime() : 0,
+        chosenAt: item.chosen_at ? new Date(item.chosen_at).getTime() : 0,
         primaryAction: item.primary_action || null,
         shortlisted: !!item.shortlisted,
         dismissed: !!item.dismissed,
@@ -152,6 +155,9 @@ export function TripsProvider({ children }) {
       coverImageUrl: t.cover_image_url || "",
       coverImageSource: t.cover_image_source || "",
       coverUpdatedAt: t.cover_updated_at || null,
+      decisionStatus: t.decision_status || "none",
+      decidedAt: t.decided_at ? new Date(t.decided_at).getTime() : 0,
+      decisionDismissed: !!t.decision_dismissed,
       createdAt: t.created_at,
       items: itemsByTrip.get(t.id) || [],
       shareId: t.share_id || "",
@@ -197,6 +203,9 @@ export function TripsProvider({ children }) {
       coverImageUrl: data.cover_image_url || "",
       coverImageSource: data.cover_image_source || "",
       coverUpdatedAt: data.cover_updated_at || null,
+      decisionStatus: data.decision_status || "none",
+      decidedAt: data.decided_at ? new Date(data.decided_at).getTime() : 0,
+      decisionDismissed: !!data.decision_dismissed,
       createdAt: data.created_at,
       items: [],
       shareId: data.share_id || "",
@@ -293,6 +302,9 @@ export function TripsProvider({ children }) {
       lastOpenedAt: data.last_opened_at ? new Date(data.last_opened_at).getTime() : 0,
       decisionGroupId: data.decision_group_id || null,
       chosen: !!data.chosen,
+      decisionState: data.decision_state || "active",
+      ruledOutAt: data.ruled_out_at ? new Date(data.ruled_out_at).getTime() : 0,
+      chosenAt: data.chosen_at ? new Date(data.chosen_at).getTime() : 0,
       primaryAction: data.primary_action || null,
       shortlisted: !!data.shortlisted,
       dismissed: !!data.dismissed,
@@ -376,6 +388,9 @@ export function TripsProvider({ children }) {
       lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
       decisionGroupId: item.decision_group_id || null,
       chosen: !!item.chosen,
+      decisionState: item.decision_state || "active",
+      ruledOutAt: item.ruled_out_at ? new Date(item.ruled_out_at).getTime() : 0,
+      chosenAt: item.chosen_at ? new Date(item.chosen_at).getTime() : 0,
       primaryAction: item.primary_action || null,
       shortlisted: !!item.shortlisted,
       dismissed: !!item.dismissed,
@@ -431,6 +446,12 @@ export function TripsProvider({ children }) {
           ),
         };
       })
+    );
+  }
+
+  function updateTripState(tripId, updates) {
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, ...updates } : t))
     );
   }
 
@@ -625,6 +646,7 @@ export function TripsProvider({ children }) {
     updateItemNote,
     updateItemTitle,
     updateItemEngagement,
+    updateTripState,
     enableShare,
     disableShare,
     toggleTripPinned,

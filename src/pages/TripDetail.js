@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrips } from "../hooks/useTrips";
 import { supabase } from "../lib/supabaseClient";
@@ -402,7 +402,6 @@ function CollectionCoverHeader({ trip, onShare, showShare }) {
 
 export default function TripDetail() {
   const { id } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const {
     trips,
@@ -411,6 +410,7 @@ export default function TripDetail() {
     updateItemNote,
     updateItemTitle,
     updateItemEngagement,
+    updateTripState,
     enableShare,
     toggleItemPinned,
     user,
@@ -445,14 +445,13 @@ export default function TripDetail() {
   const [collapsedDomains, setCollapsedDomains] = useState({});
   const [inlineError, setInlineError] = useState("");
   const [inlineToast, setInlineToast] = useState("");
-  const [showAllComparisons, setShowAllComparisons] = useState(false);
-  const [highlightGroupId, setHighlightGroupId] = useState("");
-  const [reviewOnlyGroupIds, setReviewOnlyGroupIds] = useState(new Set());
-  const [candidateByGroup, setCandidateByGroup] = useState({});
-  const [bannerDismissedGroupIds, setBannerDismissedGroupIds] = useState(new Set());
-  const [showComparisonExplainer, setShowComparisonExplainer] = useState(false);
-  const [focusGroupId, setFocusGroupId] = useState("");
-  const comparisonTrackedRef = useRef({ shown: false, explainer: false });
+  const [decisionMode, setDecisionMode] = useState("normal");
+  const [pickWinnerOpen, setPickWinnerOpen] = useState(false);
+  const [pickWinnerSelection, setPickWinnerSelection] = useState("");
+  const [ruledOutOpen, setRuledOutOpen] = useState(false);
+  const [alternativesOpen, setAlternativesOpen] = useState(false);
+  const decisionScrollRef = useRef(null);
+  const autoPickRef = useRef({ count: null });
 
   const trip = tripsById.get(id);
   const collectionLabel = getCollectionLabel(trip?.type);
@@ -507,16 +506,13 @@ export default function TripDetail() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(location.search);
-    const focusGroup = params.get("focusGroup");
-    if (!focusGroup) return;
-    setFocusGroupId(focusGroup);
-    const target = document.getElementById(`decision-group-${focusGroup}`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    setHighlightGroupId(focusGroup);
-    setTimeout(() => setHighlightGroupId(""), 1500);
-  }, [location.search]);
+    if (!decisionScrollRef.current) return;
+    const nextScroll = decisionScrollRef.current;
+    decisionScrollRef.current = null;
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: nextScroll });
+    });
+  }, [decisionMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -663,23 +659,58 @@ export default function TripDetail() {
 
   const filteredItems = filteredState.items;
   const duplicateCount = filteredState.duplicateCount;
-  const focusItems = useMemo(() => {
-    if (!focusGroupId || !trip?.items) return [];
-    return trip.items.filter(
-      (item) => item.decisionGroupId === focusGroupId && !item.dismissed
-    );
-  }, [focusGroupId, trip]);
-
   const compareItems = useMemo(() => {
     if (!filteredItems.length || compareSelected.size === 0) return [];
     return filteredItems.filter((item) => compareSelected.has(item.id));
   }, [filteredItems, compareSelected]);
 
-  const groupedItems = useMemo(() => {
+  const decisionStatus = trip?.decisionStatus || "none";
+  const decisionDismissed = !!trip?.decisionDismissed;
+  const decisionItems = trip?.items || [];
+  const decisionActiveItems = useMemo(
+    () =>
+      decisionItems.filter(
+        (item) => !item.decisionState || item.decisionState === "active"
+      ),
+    [decisionItems]
+  );
+  const decisionRuledOutItems = useMemo(
+    () => decisionItems.filter((item) => item.decisionState === "ruled_out"),
+    [decisionItems]
+  );
+  const decisionChosenItem = useMemo(
+    () => decisionItems.find((item) => item.decisionState === "chosen") || null,
+    [decisionItems]
+  );
+  const decisionActiveCount = decisionActiveItems.length;
+  const decisionRuledOutCount = decisionRuledOutItems.length;
+  const decisionHasComparable =
+    decisionItems.length >= 2 && decisionItems.some((item) => !!item.decisionGroupId);
+  const pickWinnerItems = useMemo(() => {
+    if (decisionStatus === "decided") {
+      const items = [];
+      const seen = new Set();
+      [decisionChosenItem, ...decisionRuledOutItems, ...decisionActiveItems].forEach((item) => {
+        if (!item || seen.has(item.id)) return;
+        seen.add(item.id);
+        items.push(item);
+      });
+      return items;
+    }
+    return decisionActiveItems;
+  }, [decisionActiveItems, decisionChosenItem, decisionRuledOutItems, decisionStatus]);
+  const filteredDisplayItems = useMemo(() => {
+    if (decisionStatus !== "decided") return filteredItems;
+    const excluded = new Set();
+    if (decisionChosenItem?.id) excluded.add(decisionChosenItem.id);
+    decisionRuledOutItems.forEach((item) => excluded.add(item.id));
+    return filteredItems.filter((item) => !excluded.has(item.id));
+  }, [decisionChosenItem, decisionRuledOutItems, decisionStatus, filteredItems]);
+  const groupedDisplayItems = useMemo(() => {
     if (!groupByDomain) return [];
     const groups = [];
     const map = new Map();
-    filteredItems.forEach((item) => {
+    filteredDisplayItems.forEach((item) => {
       const domain = item.domain || getDomain(item.airbnbUrl) || "Unknown domain";
       if (!map.has(domain)) {
         const group = { domain, items: [] };
@@ -689,65 +720,7 @@ export default function TripDetail() {
       map.get(domain).items.push(item);
     });
     return groups;
-  }, [filteredItems, groupByDomain]);
-
-  const decisionGroups = useMemo(() => {
-    if (!trip?.items?.length) return [];
-    const map = new Map();
-    for (const item of trip.items) {
-      if (!item.decisionGroupId) continue;
-      if (!map.has(item.decisionGroupId)) {
-        map.set(item.decisionGroupId, { id: item.decisionGroupId, items: [] });
-      }
-      map.get(item.decisionGroupId).items.push(item);
-    }
-    const groups = Array.from(map.values()).filter((group) => {
-      const activeCount = group.items.filter((item) => !item.dismissed).length;
-      return activeCount >= 2 && activeCount <= 5;
-    });
-    groups.sort((a, b) => {
-      const aTime = Math.max(
-        ...a.items.map((item) => item.lastOpenedAt || item.addedAt || 0),
-        0
-      );
-      const bTime = Math.max(
-        ...b.items.map((item) => item.lastOpenedAt || item.addedAt || 0),
-        0
-      );
-      return bTime - aTime;
-    });
-    return groups;
-  }, [trip]);
-
-  const momentumGroups = useMemo(() => {
-    return decisionGroups.filter((group) => {
-      const activeItems = group.items.filter((item) => !item.dismissed);
-      if (activeItems.length < 2) return false;
-      return activeItems.some((item) => (item.openCount || 0) >= 2 || item.shortlisted);
-    });
-  }, [decisionGroups]);
-
-  const orderedDecisionGroups = useMemo(() => {
-    if (!decisionGroups.length) return [];
-    const momentumIds = new Set(momentumGroups.map((group) => group.id));
-    const nonMomentum = decisionGroups.filter((group) => !momentumIds.has(group.id));
-    return [...momentumGroups, ...nonMomentum];
-  }, [decisionGroups, momentumGroups]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (momentumGroups.length === 0) return;
-    if (!comparisonTrackedRef.current.shown) {
-      comparisonTrackedRef.current.shown = true;
-      trackEvent("comparison_group_shown");
-    }
-    const seen = localStorage.getItem("stash_seen_comparison_explainer") === "true";
-    if (!seen && !comparisonTrackedRef.current.explainer) {
-      comparisonTrackedRef.current.explainer = true;
-      setShowComparisonExplainer(true);
-      trackEvent("comparison_explainer_shown");
-    }
-  }, [momentumGroups.length]);
+  }, [filteredDisplayItems, groupByDomain]);
 
   const hasActiveFilters =
     !!searchText.trim() ||
@@ -756,10 +729,6 @@ export default function TripDetail() {
     !!domainInclude.trim() ||
     !!domainExclude.trim() ||
     fileType !== "all";
-  const visibleDecisionGroups = showAllComparisons
-    ? orderedDecisionGroups
-    : orderedDecisionGroups.slice(0, 2);
-  const hasHiddenDecisionGroups = orderedDecisionGroups.length > 2;
 
   function isStaleItem(item) {
     const now = Date.now();
@@ -799,125 +768,8 @@ export default function TripDetail() {
     }
   }
 
-  function markExplainerSeen() {
-    if (typeof window === "undefined") return;
-    if (localStorage.getItem("stash_seen_comparison_explainer") === "true") return;
-    localStorage.setItem("stash_seen_comparison_explainer", "true");
-    setShowComparisonExplainer(false);
-    trackEvent("comparison_explainer_dismissed");
-  }
-
-  async function resolveDecisionGroup(groupId) {
-    const { supabaseUrl, accessToken } = await getAccessToken();
-    if (!supabaseUrl || !accessToken || !trip?.id || !groupId) return;
-    try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/decision-group-resolve`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ collectionId: trip.id, decisionGroupId: groupId }),
-      });
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (payload?.status === "candidate_chosen") {
-        setCandidateByGroup((prev) => ({ ...prev, [groupId]: payload.linkId }));
-      } else if (payload?.status === "chosen") {
-        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
-        if (payload?.linkId) {
-          updateItemEngagement(trip.id, payload.linkId, { chosen: true });
-        }
-      } else {
-        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
-      }
-    } catch {
-      // ignore resolution failures
-    }
-  }
-
-  async function setLinkFlags(item, flags, groupId) {
-    const { supabaseUrl, accessToken } = await getAccessToken();
-    if (!supabaseUrl || !accessToken || !item?.id) return;
-    try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/link-set-flags`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ linkId: item.id, ...flags }),
-      });
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (payload?.id) {
-        updateItemEngagement(trip.id, item.id, {
-          shortlisted: payload.shortlisted,
-          dismissed: payload.dismissed,
-          chosen: payload.chosen,
-        });
-      }
-      if (groupId) {
-        resolveDecisionGroup(groupId);
-      }
-    } catch {
-      // ignore flag failures
-    }
-  }
-
-  async function markChosen(linkId, groupId) {
-    const { supabaseUrl, accessToken } = await getAccessToken();
-    if (!supabaseUrl || !accessToken || !linkId) return;
-    try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/mark-chosen`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ linkId }),
-      });
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (payload?.id) {
-        updateItemEngagement(trip.id, payload.id, { chosen: true });
-        setCandidateByGroup((prev) => ({ ...prev, [groupId]: null }));
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  async function archiveDecisionGroupOthers(groupId, chosenLinkId) {
-    const { supabaseUrl, accessToken } = await getAccessToken();
-    if (!supabaseUrl || !accessToken || !trip?.id) return;
-    try {
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/archive-decision-group-others`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            collectionId: trip.id,
-            decisionGroupId: groupId,
-            chosenLinkId,
-          }),
-        }
-      );
-      if (!response.ok) return;
-      updateItemEngagement(trip.id, chosenLinkId, { dismissed: false });
-      setInlineToastMessage("Archived the rest");
-    } catch {
-      // ignore
-    }
-  }
-
   async function handleOpenItem(item) {
     if (!item?.airbnbUrl) return;
-    markExplainerSeen();
     const { supabaseUrl, accessToken } = await getAccessToken();
 
     if (supabaseUrl && accessToken && item.id) {
@@ -956,29 +808,6 @@ export default function TripDetail() {
 
     window.open(item.airbnbUrl, "_blank", "noopener,noreferrer");
     trackEvent("link_opened", { linkId: item.id, collectionId: trip?.id });
-  }
-
-  function shouldShowNudge(group) {
-    const now = Date.now();
-    const hasRepeatOpens = group.items.some((item) => (item.openCount || 0) >= 2);
-    if (!hasRepeatOpens) return false;
-    const groupRecent = group.items.every((item) => {
-      if (!item.addedAt) return false;
-      return now - item.addedAt <= 30 * DAY_MS;
-    });
-    if (!groupRecent) return false;
-    const maxOpenedAt = Math.max(...group.items.map((item) => item.lastOpenedAt || 0), 0);
-    if (!maxOpenedAt) return false;
-    return now - maxOpenedAt > 7 * DAY_MS;
-  }
-
-  function handleReviewGroup(groupId) {
-    markExplainerSeen();
-    const target = document.getElementById(`decision-group-${groupId}`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    setHighlightGroupId(groupId);
-    setTimeout(() => setHighlightGroupId(""), 1500);
   }
 
   function startEditTitle(item) {
@@ -1099,6 +928,353 @@ export default function TripDetail() {
     setCompareSelected(new Set());
   }
 
+  useEffect(() => {
+    if (!trip?.id || !user) return;
+    if (decisionStatus !== "none") return;
+    if (!decisionHasComparable) return;
+    const previous = {
+      decisionStatus,
+      decidedAt: trip.decidedAt || 0,
+      decisionDismissed: !!trip.decisionDismissed,
+    };
+    updateTripState(trip.id, { decisionStatus: "in_progress" });
+    supabase
+      .from("trips")
+      .update({ decision_status: "in_progress", decided_at: null })
+      .eq("id", trip.id)
+      .eq("owner_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          updateTripState(trip.id, previous);
+        }
+      });
+  }, [decisionHasComparable, decisionStatus, trip, updateTripState, user]);
+
+  useEffect(() => {
+    if (decisionMode !== "narrow") {
+      autoPickRef.current.count = null;
+      return;
+    }
+    if (decisionStatus === "decided") return;
+    if (decisionActiveCount !== 1) {
+      autoPickRef.current.count = null;
+      return;
+    }
+    if (pickWinnerOpen) return;
+    if (autoPickRef.current.count === decisionActiveCount) return;
+    const remaining = decisionActiveItems[0];
+    if (!remaining) return;
+    autoPickRef.current.count = decisionActiveCount;
+    setPickWinnerSelection(remaining.id);
+    setPickWinnerOpen(true);
+  }, [decisionActiveCount, decisionActiveItems, decisionMode, decisionStatus, pickWinnerOpen]);
+
+  useEffect(() => {
+    if (decisionStatus !== "decided") return;
+    if (decisionMode === "normal") return;
+    setDecisionMode("normal");
+  }, [decisionMode, decisionStatus]);
+
+  function setDecisionModeWithScroll(nextMode) {
+    if (typeof window !== "undefined") {
+      decisionScrollRef.current = window.scrollY;
+    }
+    setDecisionMode(nextMode);
+  }
+
+  async function updateTripDecision(nextUpdates) {
+    if (!trip?.id || !user) return false;
+    const previous = {
+      decisionStatus: decisionStatus || "none",
+      decidedAt: trip.decidedAt || 0,
+      decisionDismissed: !!trip.decisionDismissed,
+    };
+    updateTripState(trip.id, nextUpdates);
+    const payload = {};
+    if ("decisionStatus" in nextUpdates) payload.decision_status = nextUpdates.decisionStatus;
+    if ("decidedAt" in nextUpdates) {
+      payload.decided_at = nextUpdates.decidedAt
+        ? new Date(nextUpdates.decidedAt).toISOString()
+        : null;
+    }
+    if ("decisionDismissed" in nextUpdates) {
+      payload.decision_dismissed = !!nextUpdates.decisionDismissed;
+    }
+    const { error } = await supabase
+      .from("trips")
+      .update(payload)
+      .eq("id", trip.id)
+      .eq("owner_id", user.id);
+    if (error) {
+      updateTripState(trip.id, previous);
+      setInlineErrorMessage("Couldn’t update decision state.");
+      return false;
+    }
+    return true;
+  }
+
+  async function handleDecisionDismiss() {
+    await updateTripDecision({ decisionDismissed: true });
+  }
+
+  async function handleDecisionRestoreBanner() {
+    await updateTripDecision({ decisionDismissed: false });
+  }
+
+  async function handleRuleOutItem(item) {
+    if (!item?.id || !trip?.id) return;
+    const now = Date.now();
+    const previous = {
+      decisionState: item.decisionState || "active",
+      ruledOutAt: item.ruledOutAt || 0,
+      chosenAt: item.chosenAt || 0,
+      chosen: !!item.chosen,
+    };
+    updateItemEngagement(trip.id, item.id, {
+      decisionState: "ruled_out",
+      ruledOutAt: now,
+      chosenAt: 0,
+      chosen: false,
+    });
+    const { error } = await supabase
+      .from("trip_items")
+      .update({
+        decision_state: "ruled_out",
+        ruled_out_at: new Date(now).toISOString(),
+        chosen_at: null,
+        chosen: false,
+      })
+      .eq("id", item.id);
+    if (error) {
+      updateItemEngagement(trip.id, item.id, previous);
+      setInlineErrorMessage("Couldn’t move item.");
+      return;
+    }
+    setInlineToastMessage("Moved to ruled out");
+  }
+
+  async function handleRestoreItem(item) {
+    if (!item?.id || !trip?.id) return;
+    if (item.decisionState !== "ruled_out") return;
+    const previous = {
+      decisionState: item.decisionState || "active",
+      ruledOutAt: item.ruledOutAt || 0,
+      chosenAt: item.chosenAt || 0,
+      chosen: !!item.chosen,
+    };
+    updateItemEngagement(trip.id, item.id, {
+      decisionState: "active",
+      ruledOutAt: 0,
+      chosenAt: 0,
+      chosen: false,
+    });
+    const { error } = await supabase
+      .from("trip_items")
+      .update({
+        decision_state: "active",
+        ruled_out_at: null,
+        chosen_at: null,
+        chosen: false,
+      })
+      .eq("id", item.id);
+    if (error) {
+      updateItemEngagement(trip.id, item.id, previous);
+      setInlineErrorMessage("Couldn’t restore item.");
+      return;
+    }
+  }
+
+  async function handleDecisionReset() {
+    if (!trip?.id) return;
+    const previousTrip = {
+      decisionStatus,
+      decidedAt: trip.decidedAt || 0,
+      decisionDismissed: !!trip.decisionDismissed,
+    };
+    const previousItems = new Map(
+      decisionItems.map((item) => [
+        item.id,
+        {
+          decisionState: item.decisionState || "active",
+          ruledOutAt: item.ruledOutAt || 0,
+          chosenAt: item.chosenAt || 0,
+          chosen: !!item.chosen,
+        },
+      ])
+    );
+    updateTripState(trip.id, {
+      decisionStatus: "in_progress",
+      decidedAt: 0,
+      decisionDismissed: false,
+    });
+    decisionItems.forEach((item) => {
+      updateItemEngagement(trip.id, item.id, {
+        decisionState: "active",
+        ruledOutAt: 0,
+        chosenAt: 0,
+        chosen: false,
+      });
+    });
+    const [itemsResult, tripResult] = await Promise.all([
+      supabase
+        .from("trip_items")
+        .update({
+          decision_state: "active",
+          ruled_out_at: null,
+          chosen_at: null,
+          chosen: false,
+        })
+        .eq("trip_id", trip.id),
+      supabase
+        .from("trips")
+        .update({ decision_status: "in_progress", decided_at: null, decision_dismissed: false })
+        .eq("id", trip.id)
+        .eq("owner_id", user?.id),
+    ]);
+    if (itemsResult.error || tripResult.error) {
+      updateTripState(trip.id, previousTrip);
+      previousItems.forEach((value, itemId) => {
+        updateItemEngagement(trip.id, itemId, value);
+      });
+      setInlineErrorMessage("Couldn’t reset decision.");
+      return;
+    }
+    setInlineToastMessage("Reset decision");
+  }
+
+  function openPickWinner(selectedId) {
+    if (selectedId) {
+      setPickWinnerSelection(selectedId);
+    }
+    setPickWinnerOpen(true);
+  }
+
+  async function handleConfirmWinner() {
+    if (!trip?.id || !pickWinnerSelection) return;
+    const now = Date.now();
+    const selectedId = pickWinnerSelection;
+    const candidateIds = pickWinnerItems.map((item) => item.id);
+    const otherActiveIds = candidateIds.filter((id) => id !== selectedId);
+    const previousTrip = {
+      decisionStatus,
+      decidedAt: trip.decidedAt || 0,
+      decisionDismissed: !!trip.decisionDismissed,
+    };
+    const previousItems = new Map();
+    decisionItems.forEach((item) => {
+      if (item.id === selectedId || otherActiveIds.includes(item.id)) {
+        previousItems.set(item.id, {
+          decisionState: item.decisionState || "active",
+          ruledOutAt: item.ruledOutAt || 0,
+          chosenAt: item.chosenAt || 0,
+          chosen: !!item.chosen,
+        });
+      }
+    });
+    updateTripState(trip.id, { decisionStatus: "decided", decidedAt: now });
+    updateItemEngagement(trip.id, selectedId, {
+      decisionState: "chosen",
+      chosenAt: now,
+      ruledOutAt: 0,
+      chosen: true,
+    });
+    otherActiveIds.forEach((id) => {
+      updateItemEngagement(trip.id, id, {
+        decisionState: "ruled_out",
+        ruledOutAt: now,
+        chosenAt: 0,
+        chosen: false,
+      });
+    });
+    const [chosenResult, ruledOutResult, tripResult] = await Promise.all([
+      supabase
+        .from("trip_items")
+        .update({
+          decision_state: "chosen",
+          chosen_at: new Date(now).toISOString(),
+          ruled_out_at: null,
+          chosen: true,
+        })
+        .eq("id", selectedId),
+      otherActiveIds.length
+        ? supabase
+            .from("trip_items")
+            .update({
+              decision_state: "ruled_out",
+              ruled_out_at: new Date(now).toISOString(),
+              chosen_at: null,
+              chosen: false,
+            })
+            .in("id", otherActiveIds)
+        : Promise.resolve({ error: null }),
+      supabase
+        .from("trips")
+        .update({ decision_status: "decided", decided_at: new Date(now).toISOString() })
+        .eq("id", trip.id)
+        .eq("owner_id", user?.id),
+    ]);
+    if (chosenResult.error || ruledOutResult.error || tripResult.error) {
+      updateTripState(trip.id, previousTrip);
+      previousItems.forEach((value, itemId) => {
+        updateItemEngagement(trip.id, itemId, value);
+      });
+      setInlineErrorMessage("Couldn’t mark winner.");
+      return;
+    }
+    setPickWinnerOpen(false);
+    setDecisionModeWithScroll("normal");
+    setInlineToastMessage("Marked as decided.");
+  }
+
+  async function handleReopenDecision() {
+    if (!trip?.id || !decisionChosenItem) return;
+    const previousTrip = {
+      decisionStatus,
+      decidedAt: trip.decidedAt || 0,
+      decisionDismissed: !!trip.decisionDismissed,
+    };
+    const previousItem = {
+      decisionState: decisionChosenItem.decisionState || "active",
+      ruledOutAt: decisionChosenItem.ruledOutAt || 0,
+      chosenAt: decisionChosenItem.chosenAt || 0,
+      chosen: !!decisionChosenItem.chosen,
+    };
+    updateTripState(trip.id, { decisionStatus: "in_progress", decidedAt: 0 });
+    updateItemEngagement(trip.id, decisionChosenItem.id, {
+      decisionState: "active",
+      chosenAt: 0,
+      ruledOutAt: 0,
+      chosen: false,
+    });
+    const [itemResult, tripResult] = await Promise.all([
+      supabase
+        .from("trip_items")
+        .update({
+          decision_state: "active",
+          chosen_at: null,
+          ruled_out_at: null,
+          chosen: false,
+        })
+        .eq("id", decisionChosenItem.id),
+      supabase
+        .from("trips")
+        .update({ decision_status: "in_progress", decided_at: null })
+        .eq("id", trip.id)
+        .eq("owner_id", user?.id),
+    ]);
+    if (itemResult.error || tripResult.error) {
+      updateTripState(trip.id, previousTrip);
+      updateItemEngagement(trip.id, decisionChosenItem.id, previousItem);
+      setInlineErrorMessage("Couldn’t reopen decision.");
+      return;
+    }
+  }
+
+  function handleChangeWinner() {
+    if (!decisionChosenItem) return;
+    openPickWinner(decisionChosenItem.id);
+  }
+
 
   async function handleToggleShare() {
     if (!trip?.shareId) {
@@ -1203,7 +1379,7 @@ export default function TripDetail() {
     const isStale = isStaleItem(item);
     const action = normalizePrimaryAction(item.primaryAction);
     const actionLabel = primaryActionLabel(action);
-    const isChosen = !!item.chosen;
+    const isChosen = item.decisionState === "chosen" || !!item.chosen;
 
     return (
       <div
@@ -1527,7 +1703,7 @@ export default function TripDetail() {
         />
 
         <div className="detailCollectionBody">
-          <div className={`detailHeader hasCover ${focusGroupId ? "focusOnly" : ""}`}>
+          <div className="detailHeader hasCover">
             <div className="detailHeaderBar">
             <Link
               className="miniBtn linkBtn"
@@ -1556,7 +1732,7 @@ export default function TripDetail() {
             <div className="detailHeaderActions">
             <div className="detailToolbar">
               <div className="toolbarLeft">
-                <div className={`sortRow inline ${focusGroupId ? "focusOnly" : ""}`}>
+                <div className="sortRow inline">
                   <Dropdown
                     id="sortItems"
                     className="sortDropdown"
@@ -1575,7 +1751,7 @@ export default function TripDetail() {
               <div className="toolbarRight" />
             </div>
 
-            <div className={`filterRow ${focusGroupId ? "focusOnly" : ""}`}>
+            <div className="filterRow">
               <div className="searchWrap">
                 <input
                   className="input searchInput"
@@ -1704,24 +1880,6 @@ export default function TripDetail() {
               {inlineToast}
             </div>
           )}
-          {focusGroupId && (
-            <div className="focusBanner">
-              <div>
-                Showing this comparison group only.
-              </div>
-              <button
-                className="miniBtn ghostBtn"
-                type="button"
-                onClick={() => {
-                  setFocusGroupId("");
-                  window.history.replaceState({}, "", window.location.pathname);
-                }}
-              >
-                Show all
-              </button>
-            </div>
-          )}
-
           {trip.items.length === 0 ? (
             <div className="emptyState">
               <div className="emptyTitle">Nothing here yet — stash something.</div>
@@ -1729,7 +1887,7 @@ export default function TripDetail() {
                 Save your first link to this collection.
               </div>
             </div>
-          ) : (focusGroupId ? focusItems.length === 0 : filteredItems.length === 0) ? (
+          ) : (decisionMode !== "narrow" && filteredItems.length === 0) ? (
             <div className="emptyState">
               <div className="emptyTitle">Nothing found</div>
               <div className="emptyText">
@@ -1743,253 +1901,277 @@ export default function TripDetail() {
             </div>
           ) : (
             <div className={`itemList ${compactMode ? "compact" : ""}`}>
-              {!compareMode && orderedDecisionGroups.length > 0 && (
-                <div className="decisionSection">
-                  <div className="decisionHeader">
-                    <div className="decisionTitle">You're comparing these</div>
-                    {hasHiddenDecisionGroups && (
-                      <button
-                        className="miniBtn ghostBtn"
-                        type="button"
-                        onClick={() => setShowAllComparisons((prev) => !prev)}
-                      >
-                        {showAllComparisons ? "Hide extra groups" : "View all comparisons"}
-                      </button>
-                    )}
-                  </div>
-                  {showComparisonExplainer && (
-                    <div className="decisionExplainer">
-                      Grouped automatically — looks like you're deciding between these.
+              {!compareMode && (
+                <>
+                  {decisionStatus === "decided" && decisionChosenItem && (
+                    <div className="decisionBanner decided">
+                      <div>
+                        <div className="decisionBannerTitle">Decided</div>
+                        <div className="decisionBannerSubtitle">
+                          Winner selected for this collection.
+                        </div>
+                      </div>
+                      <div className="decisionBannerActions">
+                        <button
+                          className="miniBtn ghostBtn"
+                          type="button"
+                          onClick={handleChangeWinner}
+                        >
+                          Change winner
+                        </button>
+                        <button
+                          className="miniBtn ghostBtn"
+                          type="button"
+                          onClick={handleReopenDecision}
+                        >
+                          Re-open decision
+                        </button>
+                      </div>
                     </div>
                   )}
-                  <div className="decisionGroups">
-                    {visibleDecisionGroups.map((group) => {
-                      const activeItems = group.items.filter((item) => !item.dismissed);
-                      if (activeItems.length < 2) {
-                        return null;
-                      }
-                      const shortlistedItems = activeItems.filter((item) => item.shortlisted);
-                      const dismissedCount = group.items.filter((item) => item.dismissed).length;
-                      const chosenItems = activeItems.filter((item) => item.chosen);
-                      const bannerDismissed = bannerDismissedGroupIds.has(group.id);
-                      const showDecisionBanner = chosenItems.length > 0 && !bannerDismissed;
-                      const chosenLink = chosenItems[0];
-                      const reviewOnly = reviewOnlyGroupIds.has(group.id);
-                      const showingItems =
-                        reviewOnly && shortlistedItems.length > 0 ? shortlistedItems : activeItems;
-                      const showFooter = shortlistedItems.length > 0 || dismissedCount > 0;
-                      const showNudge = shouldShowNudge({ ...group, items: activeItems });
-                      const candidateLinkId = candidateByGroup[group.id];
-                      return (
-                        <div
-                          key={group.id}
-                          id={`decision-group-${group.id}`}
-                          className={`decisionGroup ${
-                            highlightGroupId === group.id ? "highlight" : ""
-                          }`}
-                        >
-                          {showNudge && (
-                            <div className="decisionNudge">
-                              <span>Still deciding?</span>
-                              <button
-                                className="miniBtn ghostBtn"
-                                type="button"
-                                onClick={() => handleReviewGroup(group.id)}
-                              >
-                                Review
-                              </button>
-                            </div>
-                          )}
-                          {showDecisionBanner && (
-                            <div className="decisionBanner">
-                              <div>
-                                <div className="decisionBannerTitle">Decision made</div>
-                                <div className="decisionBannerSubtitle">Marked as chosen.</div>
-                              </div>
-                              <div className="decisionBannerActions">
-                                {activeItems.length > 1 && chosenLink && (
-                                  <button
-                                    className="miniBtn ghostBtn"
-                                    type="button"
-                                    onClick={() => {
-                                      trackEvent("archive_rest_clicked", {
-                                        decisionGroupId: group.id,
-                                        collectionId: trip.id,
-                                      });
-                                      activeItems.forEach((item) => {
-                                        if (item.id === chosenLink.id) return;
-                                        updateItemEngagement(trip.id, item.id, {
-                                          dismissed: true,
-                                          shortlisted: false,
-                                        });
-                                      });
-                                      archiveDecisionGroupOthers(group.id, chosenLink.id);
-                                    }}
-                                  >
-                                    Archive the rest
-                                  </button>
-                                )}
-                                <button
-                                  className="miniBtn ghostBtn"
-                                  type="button"
-                                  onClick={() =>
-                                    setBannerDismissedGroupIds((prev) => {
-                                      const next = new Set(prev);
-                                      next.add(group.id);
-                                      return next;
-                                    })
-                                  }
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          <div className="decisionRow">
-                            {showingItems.map((item) => {
-                              const titleParts = splitTitleParts(item.title, item.airbnbUrl);
-                              const domainLabel = item.domain || getDomain(item.airbnbUrl);
-                              const action = normalizePrimaryAction(item.primaryAction);
-                              const actionLabel = primaryActionLabel(action);
-                              const isStale = isStaleItem(item);
-                              const isChosen = !!item.chosen;
-                              const isShortlisted = !!item.shortlisted;
-                              return (
-                                <div
-                                  key={item.id}
-                                  className={`decisionItem ${isStale ? "stale" : ""} ${
-                                    isShortlisted ? "shortlisted" : ""
-                                  }`}
-                                >
-                                  <div className="decisionActions">
-                                    <button
-                                      className={`shortlistBtn ${isShortlisted ? "active" : ""}`}
-                                      type="button"
-                                      title={isShortlisted ? "Remove from shortlist" : "Shortlist"}
-                                      onClick={() => {
-                                        const next = !isShortlisted;
-                                        markExplainerSeen();
-                                        updateItemEngagement(trip.id, item.id, {
-                                          shortlisted: next,
-                                          dismissed: false,
-                                        });
-                                        setInlineToastMessage(next ? "Shortlisted" : "Removed from shortlist");
-                                        trackEvent("shortlist_toggled", {
-                                          linkId: item.id,
-                                          decisionGroupId: group.id,
-                                          collectionId: trip.id,
-                                          newState: next,
-                                        });
-                                        setLinkFlags(item, { shortlisted: next, dismissed: false }, group.id);
-                                      }}
-                                    >
-                                      {isShortlisted ? "★" : "☆"}
-                                    </button>
-                                    <button
-                                      className="dismissBtn"
-                                      type="button"
-                                      title="Dismiss"
-                                      onClick={() => {
-                                        markExplainerSeen();
-                                        updateItemEngagement(trip.id, item.id, {
-                                          shortlisted: false,
-                                          dismissed: true,
-                                        });
-                                        setInlineToastMessage("Dismissed");
-                                        setLinkFlags(item, { dismissed: true }, group.id);
-                                      }}
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                  <button
-                                    className="decisionTitleText"
-                                    type="button"
-                                    onClick={() => handleOpenItem(item)}
-                                    title={titleParts.main}
-                                  >
-                                    {titleParts.main}
-                                  </button>
-                                  <div className="decisionMeta">
-                                    {domainLabel && (
-                                      <span className="domainPill small">{domainLabel}</span>
-                                    )}
-                                    {isChosen && <span className="chosenPill">Chosen</span>}
-                                  </div>
-                                  <button
-                                    className={`primaryActionBtn mini ${
-                                      isStale ? "stale" : ""
-                                    }`}
-                                    type="button"
-                                    onClick={() => handleOpenItem(item)}
-                                  >
-                                    {actionLabel}
-                                  </button>
-                                </div>
-                              );
-                            })}
+
+                  {decisionStatus === "in_progress" &&
+                    decisionMode === "normal" &&
+                    !decisionDismissed && (
+                      <div className="decisionBanner inProgress">
+                        <div>
+                          <div className="decisionBannerTitle">Decision in progress</div>
+                          <div className="decisionBannerSubtitle">
+                            Narrow this down when you're ready.
                           </div>
-                          {showFooter && (
-                            <div className="decisionFooter">
-                              <div className="decisionFooterText">
-                                Shortlisted {shortlistedItems.length} of {activeItems.length}
+                        </div>
+                        <div className="decisionBannerActions">
+                          <button
+                            className="miniBtn"
+                            type="button"
+                            onClick={() => {
+                              setViewMode("list");
+                              setCompareMode(false);
+                              setDecisionModeWithScroll("narrow");
+                            }}
+                          >
+                            Narrow this down
+                          </button>
+                          <button
+                            className="miniBtn ghostBtn"
+                            type="button"
+                            onClick={handleDecisionDismiss}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                  {decisionStatus === "in_progress" &&
+                    decisionMode === "normal" &&
+                    decisionDismissed && (
+                      <button
+                        className="decisionToggleChip"
+                        type="button"
+                        onClick={handleDecisionRestoreBanner}
+                      >
+                        Decision banner hidden · Re-enable
+                      </button>
+                    )}
+
+                  {decisionStatus === "decided" && decisionChosenItem && (
+                    <div className="decisionWinnerCard">
+                      <div className="decisionWinnerLabel">Winner</div>
+                      <button
+                        className="decisionWinnerTitle"
+                        type="button"
+                        onClick={() => handleOpenItem(decisionChosenItem)}
+                      >
+                        {splitTitleParts(decisionChosenItem.title, decisionChosenItem.airbnbUrl).main}
+                      </button>
+                      <div className="decisionWinnerMeta">
+                        {(decisionChosenItem.domain ||
+                          getDomain(decisionChosenItem.airbnbUrl)) && (
+                          <span className="domainPill">
+                            {decisionChosenItem.domain || getDomain(decisionChosenItem.airbnbUrl)}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        className="primary-btn compact"
+                        type="button"
+                        onClick={() => handleOpenItem(decisionChosenItem)}
+                      >
+                        Open winner
+                      </button>
+                    </div>
+                  )}
+
+                  {decisionStatus === "decided" && decisionRuledOutItems.length > 0 && (
+                    <div className="decisionCollapse">
+                      <button
+                        className="decisionCollapseToggle"
+                        type="button"
+                        onClick={() => setAlternativesOpen((prev) => !prev)}
+                      >
+                        Considered alternatives ({decisionRuledOutItems.length})
+                        <span className={`chevron ${alternativesOpen ? "open" : ""}`}>▾</span>
+                      </button>
+                      {alternativesOpen && (
+                        <div className="decisionCollapseBody">
+                          {decisionRuledOutItems.map((item) => {
+                            const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                            return (
+                              <div key={item.id} className="decisionAltRow">
+                                <button
+                                  className="decisionAltTitle"
+                                  type="button"
+                                  onClick={() => handleOpenItem(item)}
+                                >
+                                  {splitTitleParts(item.title, item.airbnbUrl).main}
+                                </button>
+                                <div className="decisionAltMeta">
+                                  {domainLabel && (
+                                    <span className="domainPill small">{domainLabel}</span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="decisionFooterActions">
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {decisionMode === "narrow" && decisionStatus !== "decided" && (
+                    <div className="decisionNarrow">
+                      <div className="decisionNarrowHeader">
+                        <div className="decisionCounts">
+                          {decisionActiveCount} active • {decisionRuledOutCount} ruled out
+                        </div>
+                        <div className="decisionNarrowActions">
+                          <button
+                            className="miniBtn ghostBtn"
+                            type="button"
+                            onClick={handleDecisionReset}
+                          >
+                            Reset
+                          </button>
+                          <button
+                            className="miniBtn"
+                            type="button"
+                            onClick={() => setDecisionModeWithScroll("normal")}
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="decisionNarrowList">
+                        {decisionActiveItems.map((item) => {
+                          const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                          return (
+                            <div key={item.id} className="decisionNarrowCard">
+                              <div className="decisionNarrowMain">
+                                <button
+                                  className="decisionNarrowTitle"
+                                  type="button"
+                                  onClick={() => handleOpenItem(item)}
+                                >
+                                  {splitTitleParts(item.title, item.airbnbUrl).main}
+                                </button>
+                                <div className="decisionNarrowMeta">
+                                  {domainLabel && (
+                                    <span className="domainPill small">{domainLabel}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="decisionNarrowActions">
                                 <button
                                   className="miniBtn ghostBtn"
                                   type="button"
-                                  onClick={() =>
-                                    setReviewOnlyGroupIds((prev) => {
-                                      markExplainerSeen();
-                                      if (!prev.has(group.id)) {
-                                        trackEvent("review_shortlist_clicked", {
-                                          decisionGroupId: group.id,
-                                          collectionId: trip.id,
-                                        });
-                                      }
-                                      const next = new Set(prev);
-                                      if (next.has(group.id)) {
-                                        next.delete(group.id);
-                                      } else {
-                                        next.add(group.id);
-                                      }
-                                      return next;
-                                    })
-                                  }
-                                  disabled={shortlistedItems.length === 0}
+                                  onClick={() => setInlineToastMessage("Kept active")}
                                 >
-                                  {reviewOnly ? "Show all" : "Review shortlist"}
+                                  Keep
                                 </button>
-                                {candidateLinkId && (
-                                  <button
-                                    className="miniBtn ghostBtn"
-                                    type="button"
-                                    onClick={() => {
-                                      markExplainerSeen();
-                                      trackEvent("mark_chosen_clicked", {
-                                        linkId: candidateLinkId,
-                                        decisionGroupId: group.id,
-                                        collectionId: trip.id,
-                                      });
-                                      markChosen(candidateLinkId, group.id);
-                                    }}
-                                  >
-                                    Mark chosen
-                                  </button>
-                                )}
+                                <button
+                                  className="miniBtn danger"
+                                  type="button"
+                                  onClick={() => handleRuleOutItem(item)}
+                                >
+                                  Remove
+                                </button>
                               </div>
-                              {candidateLinkId && (
-                                <div className="decisionFooterHint">Looks like you've got a winner.</div>
-                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {decisionActiveCount === 2 && (
+                        <div className="decisionNudgeRow">
+                          <div className="decisionNudgeText">Almost there — pick one?</div>
+                          <div className="decisionNudgeActions">
+                            <button
+                              className="miniBtn"
+                              type="button"
+                              onClick={() => openPickWinner(decisionActiveItems[0]?.id)}
+                            >
+                              Pick a winner
+                            </button>
+                            <button
+                              className="miniBtn ghostBtn"
+                              type="button"
+                              onClick={() => setDecisionModeWithScroll("normal")}
+                            >
+                              Keep browsing
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {decisionRuledOutItems.length > 0 && (
+                        <div className="decisionCollapse">
+                          <button
+                            className="decisionCollapseToggle"
+                            type="button"
+                            onClick={() => setRuledOutOpen((prev) => !prev)}
+                          >
+                            Ruled out ({decisionRuledOutItems.length})
+                            <span className={`chevron ${ruledOutOpen ? "open" : ""}`}>▾</span>
+                          </button>
+                          {ruledOutOpen && (
+                            <div className="decisionCollapseBody">
+                              {decisionRuledOutItems.map((item) => {
+                                const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                                return (
+                                  <div key={item.id} className="decisionAltRow">
+                                    <button
+                                      className="decisionAltTitle"
+                                      type="button"
+                                      onClick={() => handleOpenItem(item)}
+                                    >
+                                      {splitTitleParts(item.title, item.airbnbUrl).main}
+                                    </button>
+                                    <div className="decisionAltMeta">
+                                      {domainLabel && (
+                                        <span className="domainPill small">{domainLabel}</span>
+                                      )}
+                                    </div>
+                                    <button
+                                      className="miniBtn ghostBtn"
+                                      type="button"
+                                      onClick={() => handleRestoreItem(item)}
+                                    >
+                                      Restore
+                                    </button>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
-              {duplicateCount > 0 && (
+              {decisionMode !== "narrow" && duplicateCount > 0 && (
                 <div className="dupeNotice">
                   <span>
                     {duplicateCount} duplicate{duplicateCount === 1 ? "" : "s"}{" "}
@@ -2044,7 +2226,7 @@ export default function TripDetail() {
                       const isStale = isStaleItem(item);
                       const action = normalizePrimaryAction(item.primaryAction);
                       const actionLabel = primaryActionLabel(action);
-                      const isChosen = !!item.chosen;
+                      const isChosen = item.decisionState === "chosen" || !!item.chosen;
                       return (
                         <div
                           key={item.id}
@@ -2158,11 +2340,9 @@ export default function TripDetail() {
                     })}
                   </div>
                 </div>
-              ) : focusGroupId ? (
-                focusItems.map((item) => renderListCard(item))
-              ) : groupByDomain ? (
+              ) : decisionMode === "narrow" ? null : groupByDomain ? (
                 <div className="groupList">
-                  {groupedItems.map((group) => {
+                  {groupedDisplayItems.map((group) => {
                     const isCollapsed = !!collapsedDomains[group.domain];
                     return (
                       <div key={group.domain} className="domainGroup">
@@ -2193,7 +2373,7 @@ export default function TripDetail() {
                   })}
                 </div>
               ) : (
-                filteredItems.map((item) => renderListCard(item))
+                filteredDisplayItems.map((item) => renderListCard(item))
               )}
 
               {compareEnabled && !compareMode && compareSelected.size >= 2 && (
@@ -2209,6 +2389,79 @@ export default function TripDetail() {
         </div>
       </div>
       </div>
+
+      {pickWinnerOpen && (
+        <div
+          className="decisionOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPickWinnerOpen(false)}
+        >
+          <div className="decisionSheet" onClick={(e) => e.stopPropagation()}>
+            <div className="decisionSheetHeader">
+              <div>
+                <div className="decisionSheetTitle">Pick the winner</div>
+                <div className="decisionSheetSubtitle">
+                  This will mark the collection as decided.
+                </div>
+              </div>
+              <button
+                className="shareModalClose"
+                type="button"
+                onClick={() => setPickWinnerOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="decisionSheetBody">
+              {pickWinnerItems.length === 0 ? (
+                <div className="inlineError">No active items to choose from.</div>
+              ) : (
+                pickWinnerItems.map((item) => {
+                  const titleParts = splitTitleParts(item.title, item.airbnbUrl);
+                  const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                  return (
+                    <label key={item.id} className="decisionOption">
+                      <input
+                        type="radio"
+                        name="pickWinner"
+                        checked={pickWinnerSelection === item.id}
+                        onChange={() => setPickWinnerSelection(item.id)}
+                      />
+                      <div className="decisionOptionInfo">
+                        <div className="decisionOptionTitle">{titleParts.main}</div>
+                        <div className="decisionOptionMeta">
+                          {domainLabel && (
+                            <span className="domainPill small">{domainLabel}</span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div className="decisionSheetActions">
+              <button
+                className="secondary-btn"
+                type="button"
+                onClick={() => setPickWinnerOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-btn"
+                type="button"
+                onClick={handleConfirmWinner}
+                disabled={!pickWinnerSelection}
+              >
+                Confirm winner
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {shareOpen && (trip.shareId || shareUrlOverride) && (
         <div

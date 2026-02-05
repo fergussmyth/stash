@@ -10,6 +10,7 @@ export function LoginForm({ redirectTo = null, initialEmail = "" }) {
   const { clearRememberedProfile } = useAuth();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [mode, setMode] = useState("signin");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -31,11 +32,24 @@ export function LoginForm({ redirectTo = null, initialEmail = "" }) {
       setError("Enter your password.");
       return;
     }
+    const trimmedDisplayName = displayName.trim();
+    if (mode === "signup" && !trimmedDisplayName) {
+      setError("Enter a display name.");
+      return;
+    }
 
     setSending(true);
     const authCall =
       mode === "signup"
-        ? supabase.auth.signUp({ email: trimmed, password })
+        ? supabase.auth.signUp({
+            email: trimmed,
+            password,
+            options: {
+              data: {
+                display_name: trimmedDisplayName,
+              },
+            },
+          })
         : supabase.auth.signInWithPassword({ email: trimmed, password });
     const { data, error: authError } = await authCall;
     setSending(false);
@@ -61,6 +75,8 @@ export function LoginForm({ redirectTo = null, initialEmail = "" }) {
         id: data.user.id,
         email: data.user.email ?? "",
         name:
+          trimmedDisplayName ||
+          data.user.user_metadata?.display_name ||
           data.user.user_metadata?.full_name ||
           data.user.user_metadata?.name ||
           data.user.user_metadata?.username ||
@@ -143,6 +159,15 @@ export function LoginForm({ redirectTo = null, initialEmail = "" }) {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
+      {mode === "signup" && (
+        <input
+          className="input"
+          type="text"
+          placeholder="Display name"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+        />
+      )}
       <label className="rememberRow">
         <input
           className="rememberCheckbox"

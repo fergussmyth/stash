@@ -42,17 +42,17 @@ function HeroCards({ forceMotion = false }) {
             scale: 1,
             transition: {
               type: "spring",
-              stiffness: 240,
-              damping: 20,
-              bounce: 0.35,
-              delay: index * 0.2,
+              stiffness: 220,
+              damping: 22,
+              bounce: 0.3,
+              delay: index * 0.28,
             },
           })
         )
       );
 
       if (cancelled) return;
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      await new Promise((resolve) => setTimeout(resolve, 1200));
 
       await Promise.all(
         cardControls.map((ctrl, index) => {
@@ -62,13 +62,13 @@ function HeroCards({ forceMotion = false }) {
             y: target.y,
             rotate: target.rotate,
             scale: target.scale,
-            transition: { type: "spring", stiffness: 190, damping: 14, bounce: 0.4 },
+            transition: { type: "spring", stiffness: 170, damping: 16, bounce: 0.35 },
           });
         })
       );
 
       if (cancelled) return;
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await new Promise((resolve) => setTimeout(resolve, 1400));
 
       cardControls.forEach((ctrl) =>
         ctrl.start({
@@ -80,10 +80,15 @@ function HeroCards({ forceMotion = false }) {
           transition: { type: "spring", stiffness: 240, damping: 22 },
         })
       );
-      finalControls.start({
+      await finalControls.start({
         opacity: 1,
         scale: 1,
-        transition: { type: "spring", stiffness: 240, damping: 22 },
+        transition: { type: "spring", stiffness: 220, damping: 18, bounce: 0.35 },
+      });
+      if (cancelled) return;
+      await finalControls.start({
+        scale: [1, 1.05, 1],
+        transition: { duration: 0.45, ease: "easeOut" },
       });
     }
 

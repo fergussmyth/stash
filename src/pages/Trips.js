@@ -14,13 +14,44 @@ import CollectionCard from "../components/CollectionCard";
 import CollectionsIntroModal from "../components/CollectionsIntroModal";
 
 const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
+const CATEGORY_PILLS = [
+  { value: "all", label: "All" },
+  { value: "travel", label: "Travel" },
+  { value: "fashion", label: "Fashion" },
+  { value: "general", label: "Ideas" },
+];
 const CATEGORY_LABELS = {
-  general: "General",
+  general: "Ideas",
   travel: "Travel",
   fashion: "Fashion",
 };
+const EMPTY_STATES = {
+  all: {
+    title: "No collections yet",
+    text: "Create your first collection to start organizing your links.",
+  },
+  travel: {
+    title: "No travel collections yet",
+    text: "Start a travel collection for itineraries, stays, and hotspots.",
+  },
+  fashion: {
+    title: "No fashion collections yet",
+    text: "Build a fashion collection for looks, shops, and inspo.",
+  },
+  general: {
+    title: "No ideas collections yet",
+    text: "Capture your ideas, reads, and general inspiration here.",
+  },
+};
 
 function normalizeCategory(input = "") {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (normalized === "all") return "all";
+  if (CATEGORY_OPTIONS.includes(normalized)) return normalized;
+  return "all";
+}
+
+function normalizeTripCategory(input = "") {
   const normalized = String(input || "").trim().toLowerCase();
   if (CATEGORY_OPTIONS.includes(normalized)) return normalized;
   return "general";
@@ -120,9 +151,11 @@ export default function Trips() {
   const shareBase = rawShareBase.replace(/\/+$/, "");
   const rawCategory = searchParams.get("category");
   const activeCategory = normalizeCategory(rawCategory);
-  const activeCategoryLabel = CATEGORY_LABELS[activeCategory];
   const categoryTrips = useMemo(
-    () => trips.filter((trip) => normalizeCategory(trip.type) === activeCategory),
+    () =>
+      activeCategory === "all"
+        ? trips
+        : trips.filter((trip) => normalizeTripCategory(trip.type) === activeCategory),
     [trips, activeCategory]
   );
   const filteredTrips = useMemo(() => {
@@ -131,11 +164,14 @@ export default function Trips() {
     return categoryTrips.filter((trip) => (trip.name || "").toLowerCase().includes(query));
   }, [categoryTrips, searchQuery]);
   const categoryCounts = useMemo(
-    () =>
-      CATEGORY_OPTIONS.reduce((acc, category) => {
-        acc[category] = trips.filter((trip) => normalizeCategory(trip.type) === category).length;
+    () => {
+      const counts = CATEGORY_OPTIONS.reduce((acc, category) => {
+        acc[category] = trips.filter((trip) => normalizeTripCategory(trip.type) === category).length;
         return acc;
-      }, {}),
+      }, {});
+      counts.all = trips.length;
+      return counts;
+    },
     [trips]
   );
   const collectionsCount = user ? categoryTrips.length : 0;
@@ -236,7 +272,8 @@ export default function Trips() {
       return;
     }
     setInlineSaving(true);
-    const id = await createTrip(trimmed, activeCategory);
+    const targetCategory = activeCategory === "all" ? "general" : activeCategory;
+    const id = await createTrip(trimmed, targetCategory);
     setInlineSaving(false);
     if (!id) return;
     setInlineName("");
@@ -366,6 +403,22 @@ export default function Trips() {
 
         <section className="panel p-5 collectionsPanel listPanel fullWidth">
             <div className="panelContent">
+              <div className="collectionsPillRow" role="tablist" aria-label="Collection sections">
+                {CATEGORY_PILLS.map((pill) => (
+                  <button
+                    key={pill.value}
+                    className={`collectionsPill ${
+                      activeCategory === pill.value ? "isActive" : ""
+                    }`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeCategory === pill.value}
+                    onClick={() => setSearchParams({ category: pill.value })}
+                  >
+                    {pill.label}
+                  </button>
+                ))}
+              </div>
               <div className="listHeaderRow">
                 <div className="listTitleRow">
                   <div className="listTitle">Your collections</div>
@@ -438,6 +491,47 @@ export default function Trips() {
                   </div>
                 ) : (
                   <>
+                    {user && categoryTrips.length === 0 && (
+                      <div className="tripEmptyState">
+                        <div className="tripEmptyCallout">
+                          <div className="tripEmptyIcon static" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" focusable="false">
+                              <path
+                                d="M4 6h16v12H4zM4 10h16"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </div>
+                          <div className="tripEmptyCopy">
+                            <div className="tripEmptyTitle">
+                              {EMPTY_STATES[activeCategory]?.title || "No collections yet"}
+                            </div>
+                            <div className="tripEmptyText">
+                              {EMPTY_STATES[activeCategory]?.text ||
+                                "Create your first collection to get started."}
+                            </div>
+                            <button
+                              className="tripEmptyLink"
+                              type="button"
+                              onClick={() => {
+                                if (!user) {
+                                  navigate("/login");
+                                  return;
+                                }
+                                setShowInlineCreate(true);
+                                setTimeout(() => nameInputRef.current?.focus(), 0);
+                              }}
+                            >
+                              Create a collection
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="collectionsGrid">
                       <div
                         ref={ghostCardRef}
