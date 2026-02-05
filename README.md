@@ -2,8 +2,6 @@
 
 A clean way to save links while you browse.
 
-## Chrome extension (start here)
-Stash lives in the browser so you can save a page the moment you see it.
 
 ![showcase](image-1.png)
 
@@ -14,6 +12,11 @@ Stash lives in the browser so you can save a page the moment you see it.
 - Bulk selection, auto-open control, and duplicate detection.
 - Compare up to 4 listings side-by-side and resolve decision groups.
 - Share read-only collection links with friends.
+
+## Chrome extension (start here)
+Stash lives in the browser so you can save a page the moment you see it.
+
+![extension showcase]](image.png)
 
 ## Run locally
 From the project root:
