@@ -5,10 +5,7 @@ A clean way to save links while you browse.
 ## Chrome extension (start here)
 Stash lives in the browser so you can save a page the moment you see it.
 
-## Screenshots
-![Stash extension popup](image.png)
-![Stashes collections page](image-6.png)
-![Stash decision workspace](image-7.png)
+![showcase](image-1.png)
 
 ## What it does
 - Save Airbnb links from pasted text (including short/slink URLs) or the browser extension.
