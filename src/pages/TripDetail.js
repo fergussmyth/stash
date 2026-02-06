@@ -1954,31 +1954,44 @@ export default function TripDetail() {
                         <div className="decisionWinnerLabel">Winner</div>
                       </div>
                       <div className="decisionWinnerTitleRow">
-                        <button
-                          className="decisionWinnerTitle"
-                          type="button"
-                          onClick={() => handleOpenItem(decisionChosenItem)}
+                        <a
+                          className="decisionWinnerTitleLink"
+                          href={decisionChosenItem.airbnbUrl || "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(event) => {
+                            if (!decisionChosenItem.airbnbUrl) event.preventDefault();
+                          }}
                         >
                           {splitTitleParts(decisionChosenItem.title, decisionChosenItem.airbnbUrl).main}
-                        </button>
+                        </a>
                         <div className="decisionWinnerBadges">
                           <span className="decisionWinnerBadge">Decided</span>
                           {(decisionChosenItem.domain ||
                             getDomain(decisionChosenItem.airbnbUrl)) && (
-                            <span className="domainPill">
-                              {decisionChosenItem.domain ||
-                                getDomain(decisionChosenItem.airbnbUrl)}
-                            </span>
+                            <>
+                              <span className="domainPill">
+                                {decisionChosenItem.domain ||
+                                  getDomain(decisionChosenItem.airbnbUrl)}
+                              </span>
+                              {decisionChosenItem.airbnbUrl && (
+                                <a
+                                  className="decisionExternalLink"
+                                  href={decisionChosenItem.airbnbUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label="Open winner in new tab"
+                                >
+                                  <svg viewBox="0 0 20 20" role="presentation">
+                                    <path d="M11 3h6v6h-2V6.41l-7.3 7.3-1.4-1.42 7.29-7.29H11V3z" />
+                                    <path d="M5 5h5v2H6.99v6.01h6.02V10h2v5H5V5z" />
+                                  </svg>
+                                </a>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
-                      <button
-                        className="primary-btn compact"
-                        type="button"
-                        onClick={() => handleOpenItem(decisionChosenItem)}
-                      >
-                        Open winner
-                      </button>
                       <div className="decisionWinnerActionsRow">
                         <button
                           className="decisionWinnerAction"
