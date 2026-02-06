@@ -6764,19 +6764,19 @@ h1 span {
   position: fixed;
   inset: 0;
   z-index: 70;
-  background: rgba(2, 6, 23, 0.72);
+  background: rgba(2, 6, 23, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(10px);
 }
 
 .decisionSheet {
-  width: min(520px, 100%);
-  background: rgba(10, 15, 28, 0.98);
-  border-radius: 18px;
-  padding: 18px;
+  width: min(560px, 100%);
+  background: rgba(10, 18, 36, 0.98);
+  border-radius: 20px;
+  padding: 20px;
   box-shadow: 0 18px 50px rgba(2, 6, 23, 0.6),
     inset 0 0 0 1px rgba(148, 163, 184, 0.15);
 }
@@ -6790,7 +6790,7 @@ h1 span {
 }
 
 .decisionSheetTitle {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
   color: rgba(226, 232, 240, 0.95);
 }
@@ -6804,25 +6804,29 @@ h1 span {
 
 .decisionSheetBody {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   max-height: 40vh;
   overflow: auto;
   padding-right: 4px;
 }
 
 .decisionOption {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  background: rgba(2, 6, 23, 0.35);
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.28);
   cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .decisionOption input {
-  margin: 0;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .decisionOptionInfo {
@@ -6832,7 +6836,7 @@ h1 span {
 }
 
 .decisionOptionTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: rgba(248, 250, 252, 0.9);
   white-space: nowrap;
@@ -6846,11 +6850,113 @@ h1 span {
   gap: 8px;
 }
 
+.decisionOptionCheck {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.5);
+  color: rgba(148, 163, 184, 0.6);
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.decisionOptionCheck svg {
+  width: 18px;
+  height: 18px;
+}
+
+.decisionOptionCheck circle {
+  fill: currentColor;
+}
+
+.decisionOptionCheck path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.8);
+  transform-origin: center;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.decisionOption:hover {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: rgba(30, 64, 175, 0.14);
+  transform: translateY(0);
+}
+
+.decisionOption.selected {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(59, 130, 246, 0.16);
+  box-shadow: 0 10px 24px rgba(30, 64, 175, 0.25);
+}
+
+.decisionOption.selected .decisionOptionCheck {
+  border-color: rgba(37, 99, 235, 0.95);
+  background: rgba(37, 99, 235, 0.95);
+  color: rgba(37, 99, 235, 0.95);
+  transform: scale(1.02);
+}
+
+.decisionOption.selected .decisionOptionCheck path {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.decisionOption.selected .domainPill.small {
+  background: #fff;
+  color: rgba(15, 23, 42, 0.95);
+}
+
 .decisionSheetActions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 16px;
   margin-top: 14px;
+}
+
+.decisionGhostBtn {
+  border: none;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 8px;
+  cursor: pointer;
+}
+
+.decisionGhostBtn:hover {
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.decisionPrimaryBtn {
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 8px;
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.decisionPrimaryBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: none;
+}
+
+.decisionPrimaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 .inlineToast {
@@ -7109,6 +7215,21 @@ h1 span {
 .decisionPrimaryBtn:hover {
   background: rgba(56, 189, 248, 0.3);
   border-color: rgba(125, 211, 252, 0.4);
+}
+
+.decisionSheetActions .decisionPrimaryBtn {
+  padding: 10px 8px;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.95);
+  box-shadow: none;
+}
+
+.decisionSheetActions .decisionPrimaryBtn:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .tipsCard {

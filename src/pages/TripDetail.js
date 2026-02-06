@@ -2421,12 +2421,16 @@ export default function TripDetail() {
                 pickWinnerItems.map((item) => {
                   const titleParts = splitTitleParts(item.title, item.airbnbUrl);
                   const domainLabel = item.domain || getDomain(item.airbnbUrl);
+                  const isSelected = pickWinnerSelection === item.id;
                   return (
-                    <label key={item.id} className="decisionOption">
+                    <label
+                      key={item.id}
+                      className={`decisionOption${isSelected ? " selected" : ""}`}
+                    >
                       <input
                         type="radio"
                         name="pickWinner"
-                        checked={pickWinnerSelection === item.id}
+                        checked={isSelected}
                         onChange={() => setPickWinnerSelection(item.id)}
                       />
                       <div className="decisionOptionInfo">
@@ -2437,6 +2441,12 @@ export default function TripDetail() {
                           )}
                         </div>
                       </div>
+                      <div className="decisionOptionCheck" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" role="presentation">
+                          <circle cx="10" cy="10" r="9" />
+                          <path d="M6.2 10.4l2.3 2.3 5.4-5.4" />
+                        </svg>
+                      </div>
                     </label>
                   );
                 })
@@ -2444,14 +2454,14 @@ export default function TripDetail() {
             </div>
             <div className="decisionSheetActions">
               <button
-                className="secondary-btn"
+                className="decisionGhostBtn"
                 type="button"
                 onClick={() => setPickWinnerOpen(false)}
               >
                 Cancel
               </button>
               <button
-                className="primary-btn"
+                className="decisionPrimaryBtn"
                 type="button"
                 onClick={handleConfirmWinner}
                 disabled={!pickWinnerSelection}
