@@ -1952,22 +1952,6 @@ export default function TripDetail() {
                     <div className="decisionWinnerCard">
                       <div className="decisionWinnerTop">
                         <div className="decisionWinnerLabel">Winner</div>
-                        <div className="decisionWinnerControls">
-                          <button
-                            className="decisionWinnerAction"
-                            type="button"
-                            onClick={handleChangeWinner}
-                          >
-                            Change winner
-                          </button>
-                          <button
-                            className="decisionWinnerAction"
-                            type="button"
-                            onClick={handleReopenDecision}
-                          >
-                            Re-open decision
-                          </button>
-                        </div>
                       </div>
                       <div className="decisionWinnerTitleRow">
                         <button
@@ -1977,15 +1961,16 @@ export default function TripDetail() {
                         >
                           {splitTitleParts(decisionChosenItem.title, decisionChosenItem.airbnbUrl).main}
                         </button>
-                        <span className="decisionWinnerBadge">Decided</span>
-                      </div>
-                      <div className="decisionWinnerMeta">
-                        {(decisionChosenItem.domain ||
-                          getDomain(decisionChosenItem.airbnbUrl)) && (
-                          <span className="domainPill">
-                            {decisionChosenItem.domain || getDomain(decisionChosenItem.airbnbUrl)}
-                          </span>
-                        )}
+                        <div className="decisionWinnerBadges">
+                          <span className="decisionWinnerBadge">Decided</span>
+                          {(decisionChosenItem.domain ||
+                            getDomain(decisionChosenItem.airbnbUrl)) && (
+                            <span className="domainPill">
+                              {decisionChosenItem.domain ||
+                                getDomain(decisionChosenItem.airbnbUrl)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <button
                         className="primary-btn compact"
@@ -1994,6 +1979,22 @@ export default function TripDetail() {
                       >
                         Open winner
                       </button>
+                      <div className="decisionWinnerActionsRow">
+                        <button
+                          className="decisionWinnerAction"
+                          type="button"
+                          onClick={handleChangeWinner}
+                        >
+                          Change winner
+                        </button>
+                        <button
+                          className="decisionWinnerAction"
+                          type="button"
+                          onClick={handleReopenDecision}
+                        >
+                          Re-open decision
+                        </button>
+                      </div>
                     </div>
                   )}
 
