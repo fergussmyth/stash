@@ -1903,33 +1903,6 @@ export default function TripDetail() {
             <div className={`itemList ${compactMode ? "compact" : ""}`}>
               {!compareMode && (
                 <>
-                  {decisionStatus === "decided" && decisionChosenItem && (
-                    <div className="decisionBanner decided">
-                      <div>
-                        <div className="decisionBannerTitle">Decided</div>
-                        <div className="decisionBannerSubtitle">
-                          Winner selected for this collection.
-                        </div>
-                      </div>
-                      <div className="decisionBannerActions">
-                        <button
-                          className="miniBtn ghostBtn"
-                          type="button"
-                          onClick={handleChangeWinner}
-                        >
-                          Change winner
-                        </button>
-                        <button
-                          className="miniBtn ghostBtn"
-                          type="button"
-                          onClick={handleReopenDecision}
-                        >
-                          Re-open decision
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
                   {decisionStatus === "in_progress" &&
                     decisionMode === "normal" &&
                     !decisionDismissed && (
@@ -1977,14 +1950,35 @@ export default function TripDetail() {
 
                   {decisionStatus === "decided" && decisionChosenItem && (
                     <div className="decisionWinnerCard">
-                      <div className="decisionWinnerLabel">Winner</div>
-                      <button
-                        className="decisionWinnerTitle"
-                        type="button"
-                        onClick={() => handleOpenItem(decisionChosenItem)}
-                      >
-                        {splitTitleParts(decisionChosenItem.title, decisionChosenItem.airbnbUrl).main}
-                      </button>
+                      <div className="decisionWinnerTop">
+                        <div className="decisionWinnerLabel">Winner</div>
+                        <div className="decisionWinnerControls">
+                          <button
+                            className="decisionWinnerAction"
+                            type="button"
+                            onClick={handleChangeWinner}
+                          >
+                            Change winner
+                          </button>
+                          <button
+                            className="decisionWinnerAction"
+                            type="button"
+                            onClick={handleReopenDecision}
+                          >
+                            Re-open decision
+                          </button>
+                        </div>
+                      </div>
+                      <div className="decisionWinnerTitleRow">
+                        <button
+                          className="decisionWinnerTitle"
+                          type="button"
+                          onClick={() => handleOpenItem(decisionChosenItem)}
+                        >
+                          {splitTitleParts(decisionChosenItem.title, decisionChosenItem.airbnbUrl).main}
+                        </button>
+                        <span className="decisionWinnerBadge">Decided</span>
+                      </div>
                       <div className="decisionWinnerMeta">
                         {(decisionChosenItem.domain ||
                           getDomain(decisionChosenItem.airbnbUrl)) && (
