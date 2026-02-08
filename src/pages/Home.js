@@ -5,6 +5,8 @@ import { LoginForm } from "./Login";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
+import PublicListCard from "../components/PublicListCard";
+import { fetchFollowingFeed, fetchTrendingLists } from "../lib/socialDiscovery";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -148,6 +150,8 @@ async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
   }
 }
 
+const FEED_PAGE_SIZE = 12;
+
 export default function Home() {
   const { trips, createTrip, addItemToTrip, removeItem, user } = useTrips();
   const textareaRef = useRef(null);
@@ -177,6 +181,13 @@ export default function Home() {
   const [stashFocusArmed, setStashFocusArmed] = useState(false);
   const stashWrapRef = useRef(null);
   const stashInputRef = useRef(null);
+  const [feedLists, setFeedLists] = useState([]);
+  const [feedMode, setFeedMode] = useState("following");
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const [feedHasMore, setFeedHasMore] = useState(false);
+  const [feedError, setFeedError] = useState("");
+  const feedRequestRef = useRef(0);
 
   const pendingTripKey = "pending_trip_create_name";
   const pendingTripTypeKey = "pending_trip_create_type";
@@ -312,6 +323,127 @@ export default function Home() {
     if (!query) return null;
     return tripsForSelect.find((trip) => (trip.name || "").toLowerCase() === query) || null;
   }, [stashQuery, tripsForSelect]);
+
+  const feedTitle = feedMode === "following" ? "From people you follow" : "Trending now";
+  const feedSub =
+    feedMode === "following"
+      ? "Newest public lists from creators you follow."
+      : "No followed activity yet, so these are trending this week.";
+
+  function mergeUniqueLists(prevRows, nextRows) {
+    const seen = new Set(prevRows.map((row) => row.id));
+    const merged = [...prevRows];
+    for (const row of nextRows) {
+      if (!row?.id || seen.has(row.id)) continue;
+      seen.add(row.id);
+      merged.push(row);
+    }
+    return merged;
+  }
+
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const requestId = feedRequestRef.current + 1;
+    feedRequestRef.current = requestId;
+
+    if (!viewerUserId) {
+      setFeedLists([]);
+      setFeedMode("following");
+      setFeedLoading(false);
+      setFeedLoadingMore(false);
+      setFeedHasMore(false);
+      setFeedError("");
+      return () => {
+        active = false;
+      };
+    }
+
+    setFeedLoading(true);
+    setFeedLoadingMore(false);
+    setFeedError("");
+
+    (async () => {
+      const followingResult = await fetchFollowingFeed({
+        viewerUserId,
+        limit: FEED_PAGE_SIZE,
+        offset: 0,
+      });
+
+      if (!active || feedRequestRef.current !== requestId) return;
+      const followingLists = followingResult.lists || [];
+      if (followingLists.length > 0) {
+        setFeedMode("following");
+        setFeedLists(followingLists);
+        setFeedHasMore(!!followingResult.hasMore);
+        setFeedLoading(false);
+        return;
+      }
+
+      const trendingResult = await fetchTrendingLists({
+        section: "all",
+        search: "",
+        limit: FEED_PAGE_SIZE,
+        offset: 0,
+      });
+
+      if (!active || feedRequestRef.current !== requestId) return;
+      setFeedMode("trending");
+      setFeedLists(trendingResult.lists || []);
+      setFeedHasMore(!!trendingResult.hasMore);
+      setFeedLoading(false);
+      if (followingResult.error) {
+        setFeedError("Could not load followed activity. Showing trending.");
+      }
+    })().catch(() => {
+      if (!active || feedRequestRef.current !== requestId) return;
+      setFeedLists([]);
+      setFeedHasMore(false);
+      setFeedLoading(false);
+      setFeedError("Could not load your feed right now.");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  async function loadMoreFeed() {
+    const viewerUserId = user?.id || "";
+    if (!viewerUserId || !feedHasMore || feedLoading || feedLoadingMore) return;
+    setFeedLoadingMore(true);
+    setFeedError("");
+    const offset = feedLists.length;
+
+    try {
+      const result =
+        feedMode === "following"
+          ? await fetchFollowingFeed({
+              viewerUserId,
+              limit: FEED_PAGE_SIZE,
+              offset,
+            })
+          : await fetchTrendingLists({
+              section: "all",
+              search: "",
+              limit: FEED_PAGE_SIZE,
+              offset,
+            });
+
+      if (result.error) {
+        setFeedError("Could not load more right now.");
+        setFeedLoadingMore(false);
+        return;
+      }
+
+      setFeedLists((prev) => mergeUniqueLists(prev, result.lists || []));
+      setFeedHasMore(!!result.hasMore);
+      setFeedLoadingMore(false);
+    } catch {
+      setFeedLoadingMore(false);
+      setFeedError("Could not load more right now.");
+    }
+  }
 
   function resetAll() {
     setComment("");
@@ -595,13 +727,23 @@ export default function Home() {
             actions={
               <>
                 {user ? (
-                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                    <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
-                  </Link>
+                  <>
+                    <Link className="topbarPill subtle" to="/explore">
+                      Explore
+                    </Link>
+                    <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                      <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
+                    </Link>
+                  </>
                 ) : (
-                  <Link className="topbarPill subtle" to="/login">
-                    Sign in
-                  </Link>
+                  <>
+                    <Link className="topbarPill subtle" to="/explore">
+                      Explore
+                    </Link>
+                    <Link className="topbarPill subtle" to="/login">
+                      Sign in
+                    </Link>
+                  </>
                 )}
               </>
             }
@@ -894,6 +1036,63 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            {user ? (
+              <div className="homeFeed">
+                <div className="homeFeedHead">
+                  <div className="homeRecentLabel">Your feed</div>
+                  <div className="homeFeedCopy">
+                    <div className="listTitle">{feedTitle}</div>
+                    <div className="fieldHelp">{feedSub}</div>
+                  </div>
+                </div>
+
+                {feedError ? <div className="warning">{feedError}</div> : null}
+
+                {feedLoading ? (
+                  <div className="collectionsGrid homeFeedGrid">
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <div key={index} className="publicListSkeleton" />
+                    ))}
+                  </div>
+                ) : feedLists.length === 0 ? (
+                  <div className="collectionsEmpty">
+                    <div className="collectionsEmptyIcon" aria-hidden="true">
+                      ✦
+                    </div>
+                    <div className="collectionsEmptyTitle">No lists in your feed yet</div>
+                    <div className="collectionsEmptyText">
+                      Follow creators or explore trending lists.
+                    </div>
+                    <div className="navRow">
+                      <Link className="miniBtn linkBtn" to="/explore">
+                        Open Explore
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="collectionsGrid homeFeedGrid">
+                      {feedLists.map((list) => (
+                        <PublicListCard key={list.id} list={list} handle={list.owner_handle} />
+                      ))}
+                    </div>
+                    {feedHasMore ? (
+                      <div className="exploreLoadMoreRow">
+                        <button
+                          className="miniBtn blue"
+                          type="button"
+                          onClick={loadMoreFeed}
+                          disabled={feedLoadingMore}
+                        >
+                          {feedLoadingMore ? "Loading…" : "Load more"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
 
             <div className="homeRecent">
               <div className="homeRecentLabel">

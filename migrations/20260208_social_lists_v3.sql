@@ -203,7 +203,13 @@ DECLARE
   v_is_ranked boolean;
   v_ranked_size integer;
   v_existing_count integer;
+  v_reorder_context text;
 BEGIN
+  v_reorder_context := current_setting('stash.reorder_context', true);
+  IF COALESCE(v_reorder_context, '') = '1' THEN
+    RETURN NEW;
+  END IF;
+
   SELECT l.is_ranked, l.ranked_size
   INTO v_is_ranked, v_ranked_size
   FROM public.lists l
@@ -612,18 +618,229 @@ END
 $$;
 
 -- =========================
+-- RPC: trending lists (7d saves/views)
+-- =========================
+CREATE OR REPLACE FUNCTION public.get_trending_lists(
+  p_section stash_section DEFAULT NULL,
+  p_search text DEFAULT NULL,
+  p_limit integer DEFAULT 24,
+  p_offset integer DEFAULT 0
+)
+RETURNS TABLE (
+  id uuid,
+  owner_user_id uuid,
+  section stash_section,
+  title text,
+  subtitle text,
+  slug text,
+  cover_image_url text,
+  visibility list_visibility,
+  is_ranked boolean,
+  ranked_size integer,
+  pinned_order integer,
+  save_count integer,
+  view_count integer,
+  created_at timestamptz,
+  updated_at timestamptz,
+  owner_handle text,
+  owner_display_name text,
+  owner_avatar_url text,
+  saves_last_7_days bigint,
+  views_last_7_days bigint,
+  trending_score bigint
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH save_counts AS (
+    SELECT
+      ls.list_id,
+      count(*)::bigint AS saves_last_7_days
+    FROM public.list_saves ls
+    WHERE ls.created_at >= (now() - interval '7 days')
+    GROUP BY ls.list_id
+  ),
+  view_counts AS (
+    SELECT
+      lv.list_id,
+      count(*)::bigint AS views_last_7_days
+    FROM public.list_views lv
+    WHERE lv.viewed_at >= (now() - interval '7 days')
+    GROUP BY lv.list_id
+  ),
+  candidate AS (
+    SELECT
+      l.id,
+      l.owner_user_id,
+      l.section,
+      l.title,
+      l.subtitle,
+      l.slug,
+      l.cover_image_url,
+      l.visibility,
+      l.is_ranked,
+      l.ranked_size,
+      l.pinned_order,
+      l.save_count,
+      l.view_count,
+      l.created_at,
+      l.updated_at,
+      l.last_saved_at,
+      l.last_viewed_at,
+      p.handle AS owner_handle,
+      p.display_name AS owner_display_name,
+      p.avatar_url AS owner_avatar_url,
+      COALESCE(sc.saves_last_7_days, 0) AS saves_last_7_days,
+      COALESCE(vc.views_last_7_days, 0) AS views_last_7_days
+    FROM public.lists l
+    JOIN public.profiles p ON p.id = l.owner_user_id
+    LEFT JOIN save_counts sc ON sc.list_id = l.id
+    LEFT JOIN view_counts vc ON vc.list_id = l.id
+    WHERE l.visibility = 'public'
+      AND p.is_public = true
+      AND (p_section IS NULL OR l.section = p_section)
+      AND (
+        NULLIF(btrim(p_search), '') IS NULL
+        OR l.title ILIKE '%' || p_search || '%'
+        OR COALESCE(l.subtitle, '') ILIKE '%' || p_search || '%'
+        OR p.handle ILIKE '%' || p_search || '%'
+      )
+  )
+  SELECT
+    c.id,
+    c.owner_user_id,
+    c.section,
+    c.title,
+    c.subtitle,
+    c.slug,
+    c.cover_image_url,
+    c.visibility,
+    c.is_ranked,
+    c.ranked_size,
+    c.pinned_order,
+    c.save_count,
+    c.view_count,
+    c.created_at,
+    c.updated_at,
+    c.owner_handle,
+    c.owner_display_name,
+    c.owner_avatar_url,
+    c.saves_last_7_days,
+    c.views_last_7_days,
+    (c.saves_last_7_days * 3 + c.views_last_7_days) AS trending_score
+  FROM candidate c
+  ORDER BY
+    (c.saves_last_7_days * 3 + c.views_last_7_days) DESC,
+    GREATEST(
+      COALESCE(c.last_saved_at, 'epoch'::timestamptz),
+      COALESCE(c.last_viewed_at, 'epoch'::timestamptz),
+      c.created_at
+    ) DESC,
+    c.created_at DESC
+  LIMIT GREATEST(COALESCE(p_limit, 24), 1)
+  OFFSET GREATEST(COALESCE(p_offset, 0), 0);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_trending_lists(stash_section, text, integer, integer) TO anon, authenticated;
+
+-- =========================
 -- RPC: reorder list items (atomic)
 -- =========================
 CREATE OR REPLACE FUNCTION public.reorder_list_items(list_id uuid, item_ids uuid[])
 RETURNS void
-LANGUAGE sql
+LANGUAGE plpgsql
 AS $$
-  UPDATE public.list_items li
-  SET rank_index = ord.ord
+DECLARE
+  v_input_count integer;
+  v_unique_count integer;
+  v_total_count integer;
+  v_shift integer;
+  v_is_ranked boolean;
+  v_ranked_size integer;
+BEGIN
+  IF list_id IS NULL THEN
+    RAISE EXCEPTION 'list_id is required';
+  END IF;
+
+  v_input_count := COALESCE(cardinality(item_ids), 0);
+  IF v_input_count = 0 THEN
+    RAISE EXCEPTION 'item_ids must be a non-empty array';
+  END IF;
+
+  SELECT l.is_ranked, l.ranked_size
+  INTO v_is_ranked, v_ranked_size
+  FROM public.lists l
+  WHERE l.id = reorder_list_items.list_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'list not found';
+  END IF;
+
+  SELECT count(*)
+  INTO v_unique_count
   FROM (
+    SELECT DISTINCT id
+    FROM unnest(item_ids) AS u(id)
+  ) deduped;
+
+  IF v_unique_count <> v_input_count THEN
+    RAISE EXCEPTION 'item_ids contains duplicate ids';
+  END IF;
+
+  SELECT count(*)
+  INTO v_total_count
+  FROM public.list_items li
+  WHERE li.list_id = reorder_list_items.list_id;
+
+  IF v_total_count <> v_input_count THEN
+    RAISE EXCEPTION 'item_ids must include every item in the list';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(item_ids) AS u(id)
+    LEFT JOIN public.list_items li
+      ON li.id = u.id
+     AND li.list_id = reorder_list_items.list_id
+    WHERE li.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'item_ids contains ids that are not in this list';
+  END IF;
+
+  IF v_is_ranked AND v_ranked_size IS NOT NULL AND v_input_count > v_ranked_size THEN
+    RAISE EXCEPTION 'ranked list cannot exceed % items', v_ranked_size;
+  END IF;
+
+  SELECT COALESCE(max(li.rank_index), 0) + v_input_count + 32
+  INTO v_shift
+  FROM public.list_items li
+  WHERE li.list_id = reorder_list_items.list_id;
+
+  PERFORM set_config('stash.reorder_context', '1', true);
+
+  -- Pass 1: move into a temporary rank range to avoid unique collisions.
+  WITH ord AS (
     SELECT id, ordinality::integer AS ord
     FROM unnest(item_ids) WITH ORDINALITY AS u(id, ordinality)
-  ) ord
+  )
+  UPDATE public.list_items li
+  SET rank_index = ord.ord + v_shift
+  FROM ord
   WHERE li.id = ord.id
     AND li.list_id = reorder_list_items.list_id;
+
+  -- Pass 2: apply final contiguous ranks.
+  WITH ord AS (
+    SELECT id, ordinality::integer AS ord
+    FROM unnest(item_ids) WITH ORDINALITY AS u(id, ordinality)
+  )
+  UPDATE public.list_items li
+  SET rank_index = ord.ord
+  FROM ord
+  WHERE li.id = ord.id
+    AND li.list_id = reorder_list_items.list_id;
+
+  PERFORM set_config('stash.reorder_context', '0', true);
+END;
 $$;

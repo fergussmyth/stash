@@ -13,6 +13,7 @@ import PublicProfile from "./pages/PublicProfile";
 import PublicList from "./pages/PublicList";
 import MyLists from "./pages/MyLists";
 import ListEditor from "./pages/ListEditor";
+import Explore from "./pages/Explore";
 import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
 import stashLogo from "./assets/icons/stash-favicon.png";
@@ -36,6 +37,7 @@ function AppShell() {
     location.pathname.startsWith("/trips/") ||
     location.pathname === "/review" ||
     location.pathname === "/profile" ||
+    location.pathname === "/explore" ||
     location.pathname.startsWith("/lists") ||
     location.pathname.startsWith("/@") ||
     location.pathname === "/" ||
@@ -45,6 +47,7 @@ function AppShell() {
     location.pathname === "/" ||
     location.pathname === "/login" ||
     location.pathname.startsWith("/share/") ||
+    location.pathname === "/explore" ||
     location.pathname.startsWith("/@");
 
   const showAuthGate = !loading && !user && !publicOnly;
@@ -236,6 +239,7 @@ function AppShell() {
         <Route path="/trips/:id" element={<TripDetail />} />
         <Route path="/review" element={<Review />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/explore" element={<Explore />} />
         <Route path="/lists" element={<MyLists />} />
         <Route path="/lists/new" element={<ListEditor />} />
         <Route path="/lists/:id/edit" element={<ListEditor />} />

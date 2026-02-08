@@ -184,6 +184,19 @@ function IconNote(props) {
   );
 }
 
+function IconGrip(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <circle cx="9" cy="6" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="6" r="1.5" fill="currentColor" />
+      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="9" cy="18" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="18" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function PublicList() {
   const params = useParams();
   const rawHandle = params.handle || "";
@@ -214,6 +227,8 @@ export default function PublicList() {
   const [reorderWorking, setReorderWorking] = useState(false);
   const [workingItemId, setWorkingItemId] = useState("");
   const [expandedNotes, setExpandedNotes] = useState(new Set());
+  const [dragItemId, setDragItemId] = useState("");
+  const [dragOverItemId, setDragOverItemId] = useState("");
 
   const viewTrackedRef = useRef(new Set());
   const [coverLoaded, setCoverLoaded] = useState(false);
@@ -439,6 +454,17 @@ export default function PublicList() {
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
   }
 
+  function reorderItemsByDrop(sourceId, targetId) {
+    if (!sourceId || !targetId || sourceId === targetId) return null;
+    const sourceIndex = items.findIndex((it) => it.id === sourceId);
+    const targetIndex = items.findIndex((it) => it.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return null;
+    const next = [...items];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    return next;
+  }
+
   function toggleNoteExpanded(itemId, expanded) {
     setExpandedNotes((prev) => {
       const next = new Set(prev);
@@ -463,22 +489,77 @@ export default function PublicList() {
     setWorkingItemId("");
   }
 
+  async function persistReorderWithoutRpc(nextItems) {
+    if (!list?.id) return new Error("Missing list id.");
+    const shift = nextItems.length + 1000;
+    for (let index = 0; index < nextItems.length; index += 1) {
+      const item = nextItems[index];
+      const { error } = await supabase
+        .from("list_items")
+        .update({ rank_index: index + 1 + shift })
+        .eq("id", item.id)
+        .eq("list_id", list.id);
+      if (error) return error;
+    }
+    for (let index = 0; index < nextItems.length; index += 1) {
+      const item = nextItems[index];
+      const { error } = await supabase
+        .from("list_items")
+        .update({ rank_index: index + 1 })
+        .eq("id", item.id)
+        .eq("list_id", list.id);
+      if (error) return error;
+    }
+    return null;
+  }
+
   async function applyReorder(nextItems) {
     if (!isOwner || !list) return;
     if (reorderWorking) return;
-    const ids = nextItems.map((it) => it.id);
+    const previousItems = items;
+    const normalized = nextItems.map((it, index) => ({ ...it, rank_index: index + 1 }));
+    setItems(normalized);
     setReorderWorking(true);
-    const { error } = await supabase.rpc("reorder_list_items", { list_id: list.id, item_ids: ids });
-    if (error) {
-      setToast("Couldn’t reorder right now.");
+    setDragItemId("");
+    setDragOverItemId("");
+
+    try {
+      const ids = normalized.map((it) => it.id);
+      let reorderError = null;
+      try {
+        const { error } = await supabase.rpc("reorder_list_items", { list_id: list.id, item_ids: ids });
+        reorderError = error;
+      } catch (error) {
+        reorderError = error;
+      }
+
+      if (reorderError) {
+        if (!list.is_ranked) {
+          const fallbackError = await persistReorderWithoutRpc(normalized);
+          if (!fallbackError) {
+            return;
+          }
+          setItems(previousItems);
+          const details = fallbackError?.message || reorderError?.message || "unknown error";
+          setToast(`Couldn’t reorder right now (${details}).`);
+          return;
+        }
+
+        setItems(previousItems);
+        const details = reorderError?.message || "unknown error";
+        const hint =
+          details.includes("rank_index out of range")
+            ? " Run latest social migration SQL in Supabase."
+            : "";
+        setToast(`Couldn’t reorder right now (${details}).${hint}`);
+      }
+    } finally {
       setReorderWorking(false);
-      return;
     }
-    setItems(nextItems.map((it, index) => ({ ...it, rank_index: index + 1 })));
-    setReorderWorking(false);
   }
 
   function moveItem(itemId, direction) {
+    if (reorderWorking) return;
     const index = items.findIndex((it) => it.id === itemId);
     if (index === -1) return;
     const target = index + direction;
@@ -488,6 +569,38 @@ export default function PublicList() {
     next[index] = next[target];
     next[target] = tmp;
     applyReorder(next);
+  }
+
+  function handleDragStart(event, itemId) {
+    if (!isOwner || reorderWorking || !itemId) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", itemId);
+    setDragItemId(itemId);
+    setDragOverItemId(itemId);
+  }
+
+  function handleDragOver(event, itemId) {
+    if (!isOwner || reorderWorking || !dragItemId || !itemId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (itemId !== dragOverItemId) {
+      setDragOverItemId(itemId);
+    }
+  }
+
+  function handleDrop(event, itemId) {
+    if (!isOwner || reorderWorking || !itemId) return;
+    event.preventDefault();
+    const sourceId = dragItemId || event.dataTransfer.getData("text/plain");
+    setDragItemId("");
+    setDragOverItemId("");
+    const next = reorderItemsByDrop(sourceId, itemId);
+    if (next) applyReorder(next);
+  }
+
+  function handleDragEnd() {
+    setDragItemId("");
+    setDragOverItemId("");
   }
 
   async function removeItem(itemId) {
@@ -718,7 +831,14 @@ export default function PublicList() {
                     const canMoveUp = isOwner && index > 0 && !reorderWorking;
                     const canMoveDown = isOwner && index < items.length - 1 && !reorderWorking;
                     return (
-                      <div key={item.id} className="itemCard publicListItemCard">
+                      <div
+                        key={item.id}
+                        className={`itemCard publicListItemCard ${dragItemId === item.id ? "isDragSource" : ""} ${
+                          dragOverItemId === item.id && dragItemId !== item.id ? "isDragOver" : ""
+                        }`}
+                        onDragOver={(event) => handleDragOver(event, item.id)}
+                        onDrop={(event) => handleDrop(event, item.id)}
+                      >
                         <div className="itemTop">
                           <div className="listItemLead">
                             {showRank ? <div className="rankBadge">{item.rank_index}</div> : null}
@@ -777,6 +897,18 @@ export default function PublicList() {
 
                               {isOwner ? (
                                 <>
+                                  <button
+                                    className="iconBtn bare quickActionBtn dragHandleBtn"
+                                    type="button"
+                                    draggable={!reorderWorking}
+                                    onDragStart={(event) => handleDragStart(event, item.id)}
+                                    onDragEnd={handleDragEnd}
+                                    aria-label="Drag to reorder"
+                                    title="Drag to reorder"
+                                    disabled={reorderWorking}
+                                  >
+                                    <IconGrip className="quickActionIcon" />
+                                  </button>
                                   <button
                                     className="iconBtn bare quickActionBtn"
                                     type="button"

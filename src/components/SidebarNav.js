@@ -2,6 +2,7 @@ import { Link, NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
   { label: "Home", to: "/", icon: "home" },
+  { label: "Explore", to: "/explore", icon: "spark" },
   { label: "Collections", to: "/trips", icon: "grid" },
   { label: "Lists", to: "/lists", icon: "list" },
   { label: "Review", to: "/review", icon: "check" },
@@ -65,6 +66,19 @@ function NavIcon({ name }) {
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "spark") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          d="M12 3l2.2 4.4L19 8l-3.5 3.4L16.4 16 12 13.6 7.6 16l.9-4.6L5 8l4.8-.6z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
         />
       </svg>
     );
