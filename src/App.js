@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "./hooks/useAuth";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import PublicProfile from "./pages/PublicProfile";
+import PublicList from "./pages/PublicList";
 import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
 import stashLogo from "./assets/icons/stash-favicon.png";
@@ -232,6 +233,7 @@ function AppShell() {
         <Route path="/trips/:id" element={<TripDetail />} />
         <Route path="/review" element={<Review />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/@:handle/:listSlug" element={<PublicList />} />
         <Route path="/@:handle" element={<PublicProfile />} />
         <Route path="/settings/extension" element={<ExtensionSettings />} />
         <Route path="/share/:shareId" element={<ShareTrip />} />

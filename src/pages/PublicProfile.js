@@ -334,7 +334,7 @@ export default function PublicProfile() {
                       </div>
                       <div className="collectionsGrid">
                         {pinnedLists.map((list) => (
-                          <PublicListCard key={list.id} list={list} />
+                          <PublicListCard key={list.id} list={list} handle={handle} />
                         ))}
                       </div>
                     </div>
@@ -346,7 +346,7 @@ export default function PublicProfile() {
                     </div>
                     <div className="collectionsGrid">
                       {latestLists.map((list) => (
-                        <PublicListCard key={list.id} list={list} />
+                        <PublicListCard key={list.id} list={list} handle={handle} />
                       ))}
                     </div>
                   </div>

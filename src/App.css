@@ -7338,6 +7338,21 @@ h1 span {
   justify-content: flex-end;
 }
 
+.publicListPage {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.publicListPage .collectionsTopbarSearch {
+  display: none;
+}
+
+.publicListPage .collectionsTopbarActions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
 .publicProfileHeader {
   display: flex;
   align-items: flex-start;
@@ -7472,13 +7487,183 @@ h1 span {
 }
 
 .publicListCard {
-  cursor: default;
+  display: block;
+  text-decoration: none;
+  color: inherit;
 }
 
-.publicListCard:hover {
-  transform: none;
-  box-shadow: none;
-  border-color: rgba(255, 255, 255, 0.08);
+.publicListHeaderTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.visibilityPill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: rgba(148, 163, 184, 0.16);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.visibilityPill.public {
+  background: rgba(16, 185, 129, 0.18);
+  color: #a7f3d0;
+}
+
+.visibilityPill.unlisted {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fde68a;
+}
+
+.visibilityPill.private {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.publicListOwnerRow {
+  margin-top: 10px;
+}
+
+.publicListOwnerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.publicListOwnerLink:hover {
+  background: rgba(2, 6, 23, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
+}
+
+.publicListOwnerAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.publicListOwnerAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.publicListOwnerAvatarText {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(248, 250, 252, 0.92);
+}
+
+.publicListOwnerName {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(248, 250, 252, 0.92);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publicListOwnerHandle {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(148, 163, 184, 0.92);
+}
+
+.publicListHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.publicListItemCard .itemHeaderRow {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+.listItemLead {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 10px;
+  align-items: start;
+  flex: 0 0 auto;
+}
+
+.rankBadge {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(248, 250, 252, 0.95);
+  background: rgba(59, 130, 246, 0.22);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.listItemThumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.06);
+  display: grid;
+  place-items: center;
+}
+
+.listItemThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.listItemThumbFallback {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    rgba(56, 189, 248, 0.18) 0%,
+    rgba(15, 23, 42, 0.25) 55%,
+    rgba(147, 197, 253, 0.12) 100%
+  );
+}
+
+.listItemNoteText {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 @keyframes stashShimmer {
@@ -7559,6 +7744,15 @@ h1 span {
   }
 
   .publicProfileActions .miniBtn {
+    width: 100%;
+  }
+
+  .publicListHeaderActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publicListHeaderActions .miniBtn {
     width: 100%;
   }
 }

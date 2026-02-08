@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 function makeFallbackGradient(seed) {
   let hash = 0;
@@ -18,7 +19,7 @@ function sectionLabel(section = "") {
   return "General";
 }
 
-export default function PublicListCard({ list }) {
+export default function PublicListCard({ list, handle }) {
   const [coverLoaded, setCoverLoaded] = useState(false);
   const coverImageUrl = list.cover_image_url || "";
   const coverSeed = useMemo(() => `${list.id || ""}-${list.title || ""}`, [list.id, list.title]);
@@ -31,8 +32,14 @@ export default function PublicListCard({ list }) {
   const coverBackground = isGradientCover ? coverImageUrl || fallbackGradient : fallbackGradient;
   const saveCount = Number(list.save_count || 0);
 
-  return (
-    <div className="collectionCard publicListCard" aria-label={list.title || "List"}>
+  const ownerHandle = String(handle || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+  const to = ownerHandle && list?.slug ? `/@${ownerHandle}/${list.slug}` : "";
+
+  const cardContent = (
+    <>
       <div
         className={`collectionCardCover ${coverLoaded ? "isLoaded" : ""}`}
         style={{ backgroundImage: coverBackground }}
@@ -59,7 +66,20 @@ export default function PublicListCard({ list }) {
           {list.is_ranked && list.ranked_size ? ` · Top ${list.ranked_size}` : ""}
         </div>
       </div>
+    </>
+  );
+
+  if (to) {
+    return (
+      <Link className="collectionCard publicListCard" to={to} aria-label={list.title || "List"}>
+        {cardContent}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="collectionCard publicListCard" aria-label={list.title || "List"}>
+      {cardContent}
     </div>
   );
 }
-
