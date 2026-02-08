@@ -188,6 +188,7 @@ export default function PublicList() {
   const params = useParams();
   const rawHandle = params.handle || "";
   const rawSlug = params.listSlug || "";
+  const isPublicHandlePath = String(rawHandle || "").trim().startsWith("@");
   const handle = normalizeHandleParam(rawHandle);
   const listSlug = normalizeSlugParam(rawSlug);
 
@@ -269,7 +270,7 @@ export default function PublicList() {
     setCoverLoaded(false);
 
     async function load() {
-      if (!handle || !listSlug) {
+      if (!isPublicHandlePath || !handle || !listSlug) {
         if (!active) return;
         setNotFound(true);
         setLoadingList(false);
@@ -359,7 +360,7 @@ export default function PublicList() {
     return () => {
       active = false;
     };
-  }, [authLoading, handle, listSlug, viewerUserId]);
+  }, [authLoading, handle, isPublicHandlePath, listSlug, viewerUserId]);
 
   async function toggleSave() {
     if (!list) return;
@@ -675,6 +676,11 @@ export default function PublicList() {
                 <div className="detailSectionDivider" />
 
                 <div className="publicListHeaderActions">
+                  {isOwner && list?.id ? (
+                    <Link className="miniBtn" to={`/lists/${list.id}/edit`}>
+                      Edit
+                    </Link>
+                  ) : null}
                   <button
                     className={isSaved ? "miniBtn active" : "miniBtn blue"}
                     type="button"

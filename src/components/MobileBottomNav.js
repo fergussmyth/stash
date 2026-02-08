@@ -4,6 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 const NAV_ITEMS = [
   { label: "Home", to: "/", icon: "home" },
   { label: "Collections", to: "/trips", icon: "grid" },
+  { label: "Lists", to: "/lists", icon: "list" },
   { label: "Profile", to: "/profile", icon: "user" },
 ];
 
@@ -27,6 +28,19 @@ function NavIcon({ name }) {
         <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
         <path
           d="M4 20c2-4 14-4 16 0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "list") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"

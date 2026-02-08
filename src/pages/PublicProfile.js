@@ -25,6 +25,7 @@ function displayNameForProfile(profile) {
 export default function PublicProfile() {
   const params = useParams();
   const rawHandle = params.handle || "";
+  const isPublicHandlePath = String(rawHandle || "").trim().startsWith("@");
   const handle = normalizeHandleParam(rawHandle);
   const { user, loading: authLoading } = useAuth();
   const viewerUserId = user?.id || null;
@@ -81,7 +82,7 @@ export default function PublicProfile() {
     setCheckingFollow(false);
 
     async function load() {
-      if (!handle) {
+      if (!isPublicHandlePath || !handle) {
         if (!active) return;
         setNotFound(true);
         setLoadingProfile(false);
@@ -148,7 +149,7 @@ export default function PublicProfile() {
     return () => {
       active = false;
     };
-  }, [handle, authLoading, viewerUserId]);
+  }, [authLoading, handle, isPublicHandlePath, viewerUserId]);
 
   async function toggleFollow() {
     if (!profile || !user || user.id === profile.id) return;

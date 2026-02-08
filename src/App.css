@@ -7353,6 +7353,36 @@ h1 span {
   justify-content: flex-end;
 }
 
+.listsPage {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.listsPage .collectionsTopbarSearch {
+  display: none;
+}
+
+.listsPage .collectionsTopbarActions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.listEditorPage {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.listEditorPage .collectionsTopbarSearch {
+  display: none;
+}
+
+.listEditorPage .collectionsTopbarActions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
 .publicProfileHeader {
   display: flex;
   align-items: flex-start;
@@ -7490,6 +7520,30 @@ h1 span {
   display: block;
   text-decoration: none;
   color: inherit;
+}
+
+.listEditorHandleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.listEditorHandleRow .input {
+  width: min(240px, 100%);
+}
+
+.listEditorRankRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.listEditorActions {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .publicListHeaderTitleRow {

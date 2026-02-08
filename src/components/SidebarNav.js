@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router-dom";
 const PRIMARY_NAV = [
   { label: "Home", to: "/", icon: "home" },
   { label: "Collections", to: "/trips", icon: "grid" },
+  { label: "Lists", to: "/lists", icon: "list" },
   { label: "Review", to: "/review", icon: "check" },
   { label: "Profile", to: "/profile", icon: "user" },
 ];
@@ -37,6 +38,19 @@ function NavIcon({ name }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "list") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
         />
       </svg>
     );

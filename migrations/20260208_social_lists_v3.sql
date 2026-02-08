@@ -23,7 +23,8 @@ END$$;
 ALTER TABLE IF EXISTS public.profiles
   ADD COLUMN IF NOT EXISTS handle text,
   ADD COLUMN IF NOT EXISTS bio text,
-  ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT true;
+  ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 -- If an email column exists (legacy), prevent it from being publicly selectable.
 DO $$
@@ -382,9 +383,18 @@ $$;
 
 DO $$
 BEGIN
-  IF to_regclass('public.profiles') IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM pg_trigger WHERE tgname = 'profiles_set_updated_at'
-  ) THEN
+  IF to_regclass('public.profiles') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'profiles'
+        AND column_name = 'updated_at'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_trigger WHERE tgname = 'profiles_set_updated_at'
+    )
+  THEN
     CREATE TRIGGER profiles_set_updated_at
       BEFORE UPDATE ON public.profiles
       FOR EACH ROW
