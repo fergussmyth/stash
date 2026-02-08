@@ -837,19 +837,150 @@ body {
   gap: 16px;
 }
 
+.collectionsEmptyHero {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(56, 189, 248, 0.18) 0%, transparent 62%),
+    radial-gradient(120% 120% at 100% 0%, rgba(var(--accent), 0.16) 0%, transparent 58%),
+    rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 18px 18px 16px;
+  min-height: 220px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  align-content: start;
+  overflow: hidden;
+}
+
+.collectionsEmptyHeroHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.collectionsEmptyHeroIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  flex: 0 0 auto;
+}
+
+.collectionsEmptyHeroIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.collectionsEmptyHeroCopy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.collectionsEmptyHeroTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: rgba(248, 250, 252, 0.95);
+  letter-spacing: 0.2px;
+}
+
+.collectionsEmptyHeroText {
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.92);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.collectionsEmptyHeroTips {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.collectionsEmptyHeroTip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.collectionsEmptyHeroTip::before {
+  content: "✓";
+  width: 18px;
+  height: 18px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: rgba(134, 239, 172, 0.95);
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+
+.collectionsEmptyActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.collectionsEmptyActions .primary-btn,
+.collectionsEmptyActions .secondary-btn {
+  margin-top: 0;
+  width: auto;
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.collectionsEmptyActions .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+}
+
+.collectionsEmptyActions .primary-btn--dominant {
+  box-shadow: none;
+}
+
+.collectionsEmptyActions .primary-btn--dominant:hover {
+  box-shadow: none;
+}
+
 .ghostCreateCard {
-  border: 1px dashed rgba(31, 41, 55, 0.7);
-  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(56, 189, 248, 0.10) 0%, transparent 62%),
+    rgba(255, 255, 255, 0.02);
   display: grid;
   place-items: center;
   min-height: 220px;
-  color: rgba(148, 163, 184, 0.8);
-  transition: border-color 0.2s ease, background 0.2s ease;
+  color: rgba(148, 163, 184, 0.85);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
 .ghostCreateCard:hover {
-  border-color: rgba(75, 85, 99, 0.8);
-  background: rgba(31, 41, 55, 0.2);
+  border-color: rgba(56, 189, 248, 0.35);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(56, 189, 248, 0.14) 0%, transparent 62%),
+    rgba(255, 255, 255, 0.04);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
 }
 
 .ghostCreateBody {
@@ -943,15 +1074,22 @@ body {
 }
 
 .ghostCreateIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
   font-size: 24px;
   line-height: 1;
-  color: rgba(148, 163, 184, 0.7);
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.22);
 }
 
 .ghostCreateText {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(148, 163, 184, 0.6);
+  color: rgba(226, 232, 240, 0.72);
 }
 
 .ghostCreateCard.isOpen {
@@ -1555,11 +1693,19 @@ body {
   .collectionsGrid {
     grid-template-columns: repeat(3, minmax(220px, 1fr));
   }
+
+  .collectionsEmptyHero {
+    grid-column: span 2;
+  }
 }
 
 @media (min-width: 1400px) {
   .collectionsGrid {
     grid-template-columns: repeat(4, minmax(220px, 1fr));
+  }
+
+  .collectionsEmptyHero {
+    grid-column: span 3;
   }
 }
 

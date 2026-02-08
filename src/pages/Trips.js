@@ -4,7 +4,6 @@ import Dropdown from "../components/Dropdown";
 import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
 import stashLogo from "../assets/icons/stash-favicon.png";
-import userIcon from "../assets/icons/user.png";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
@@ -20,11 +19,6 @@ const CATEGORY_PILLS = [
   { value: "fashion", label: "Fashion" },
   { value: "general", label: "Ideas" },
 ];
-const CATEGORY_LABELS = {
-  general: "Ideas",
-  travel: "Travel",
-  fashion: "Fashion",
-};
 const EMPTY_STATES = {
   all: {
     title: "No collections yet",
@@ -42,6 +36,12 @@ const EMPTY_STATES = {
     title: "No ideas collections yet",
     text: "Capture your ideas, reads, and general inspiration here.",
   },
+};
+const EMPTY_TIPS = {
+  all: ["Save anything with a link", "Pin your favorites", "Share collections in one tap"],
+  travel: ["Save stays, spots, and itineraries", "Pin your shortlist", "Share with your group"],
+  fashion: ["Save looks, shops, and inspo", "Keep outfits in one place", "Share a moodboard fast"],
+  general: ["Save reads and ideas", "Keep everything searchable", "Share a list with friends"],
 };
 
 function normalizeCategory(input = "") {
@@ -174,7 +174,6 @@ export default function Trips() {
     },
     [trips]
   );
-  const collectionsCount = user ? categoryTrips.length : 0;
   const sortedTrips = useMemo(
     () =>
       filteredTrips.slice().sort((a, b) => {
@@ -341,18 +340,6 @@ export default function Trips() {
     }
   }
 
-  async function handleSystemShare() {
-    if (!shareTrip || !navigator.share) return;
-    if (!shareTrip.shareId) return;
-    const shareUrl = `${shareBase}/share/${shareTrip.shareId}`;
-    try {
-      await navigator.share({ title: shareTrip.name, url: shareUrl });
-      setShareTrip(null);
-    } catch {
-      // keep modal open if cancelled
-    }
-  }
-
   return (
     <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
       <CollectionsIntroModal
@@ -491,31 +478,44 @@ export default function Trips() {
                   </div>
                 ) : (
                   <>
-                    {user && categoryTrips.length === 0 && (
-                      <div className="tripEmptyState">
-                        <div className="tripEmptyCallout">
-                          <div className="tripEmptyIcon static" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" focusable="false">
-                              <path
-                                d="M4 6h16v12H4zM4 10h16"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
+                    <div className="collectionsGrid">
+                      {user && categoryTrips.length === 0 && (
+                        <div className="collectionsEmptyHero" role="status" aria-live="polite">
+                          <div className="collectionsEmptyHeroHeader">
+                            <div className="collectionsEmptyHeroIcon" aria-hidden="true">
+                              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                                <path
+                                  d="M4 6h16v12H4zM4 10h16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </div>
+                            <div className="collectionsEmptyHeroCopy">
+                              <div className="collectionsEmptyHeroTitle">
+                                {EMPTY_STATES[activeCategory]?.title || "No collections yet"}
+                              </div>
+                              <div className="collectionsEmptyHeroText">
+                                {EMPTY_STATES[activeCategory]?.text ||
+                                  "Create your first collection to get started."}
+                              </div>
+                            </div>
                           </div>
-                          <div className="tripEmptyCopy">
-                            <div className="tripEmptyTitle">
-                              {EMPTY_STATES[activeCategory]?.title || "No collections yet"}
-                            </div>
-                            <div className="tripEmptyText">
-                              {EMPTY_STATES[activeCategory]?.text ||
-                                "Create your first collection to get started."}
-                            </div>
+
+                          <div className="collectionsEmptyHeroTips" aria-label="What you can do">
+                            {(EMPTY_TIPS[activeCategory] || EMPTY_TIPS.all).map((tip) => (
+                              <div key={tip} className="collectionsEmptyHeroTip">
+                                {tip}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="collectionsEmptyActions">
                             <button
-                              className="tripEmptyLink"
+                              className="primary-btn primary-btn--dominant"
                               type="button"
                               onClick={() => {
                                 if (!user) {
@@ -526,13 +526,26 @@ export default function Trips() {
                                 setTimeout(() => nameInputRef.current?.focus(), 0);
                               }}
                             >
-                              Create a collection
+                              Create collection
                             </button>
+                            {localImportAvailable ? (
+                              <button
+                                className="secondary-btn"
+                                type="button"
+                                onClick={() => {
+                                  if (!user) {
+                                    navigate("/login");
+                                    return;
+                                  }
+                                  importLocalTrips();
+                                }}
+                              >
+                                Import links
+                              </button>
+                            ) : null}
                           </div>
                         </div>
-                      </div>
-                    )}
-                    <div className="collectionsGrid">
+                      )}
                       <div
                         ref={ghostCardRef}
                         className={`collectionCard ghostCreateCard ${
