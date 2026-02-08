@@ -59,6 +59,26 @@ function getDomain(url = "") {
   }
 }
 
+function normalizeTripType(section = "") {
+  const normalized = String(section || "").trim().toLowerCase();
+  if (normalized === "travel" || normalized === "fashion" || normalized === "general") {
+    return normalized;
+  }
+  return "general";
+}
+
+function normalizeUrlForStash(input = "") {
+  let value = String(input || "").trim();
+  if (!value) return "";
+  while (/[),.\]}>"']$/.test(value)) {
+    value = value.slice(0, -1);
+  }
+  if (!/^https?:\/\//i.test(value)) {
+    value = `https://${value}`;
+  }
+  return value;
+}
+
 function formatRating(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return "";
@@ -207,7 +227,7 @@ export default function PublicList() {
 
   const { user, loading: authLoading } = useAuth();
   const viewerUserId = user?.id || null;
-  const { trips } = useTrips();
+  const { trips, createTrip, deleteTrip, reloadTripItems } = useTrips();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -221,6 +241,7 @@ export default function PublicList() {
   const [toastMsg, setToastMsg] = useState("");
 
   const [isSaved, setIsSaved] = useState(false);
+  const [savedTripId, setSavedTripId] = useState("");
   const [checkingSaved, setCheckingSaved] = useState(false);
   const [saveWorking, setSaveWorking] = useState(false);
 
@@ -279,9 +300,10 @@ export default function PublicList() {
     setLoadingItems(true);
     setNotFound(false);
     setLoadError("");
-    setToastMsg("");
     setIsSaved(false);
+    setSavedTripId("");
     setCheckingSaved(false);
+    setToastMsg("");
     setCoverLoaded(false);
 
     async function load() {
@@ -349,16 +371,34 @@ export default function PublicList() {
 
       if (viewerUserId) {
         setCheckingSaved(true);
-        const { data: saveRows, error: saveLookupError } = await supabase
+        let saveLookupError = null;
+        let saveRow = null;
+
+        const withTrip = await supabase
           .from("list_saves")
-          .select("list_id")
+          .select("list_id,saved_trip_id")
           .eq("user_id", viewerUserId)
           .eq("list_id", listData.id)
-          .limit(1);
+          .maybeSingle();
+
+        if (withTrip.error && withTrip.error.code === "42703") {
+          const fallback = await supabase
+            .from("list_saves")
+            .select("list_id")
+            .eq("user_id", viewerUserId)
+            .eq("list_id", listData.id)
+            .maybeSingle();
+          saveLookupError = fallback.error;
+          saveRow = fallback.data || null;
+        } else {
+          saveLookupError = withTrip.error;
+          saveRow = withTrip.data || null;
+        }
 
         if (!active) return;
         if (!saveLookupError) {
-          setIsSaved((saveRows || []).length > 0);
+          setIsSaved(!!saveRow);
+          setSavedTripId(saveRow?.saved_trip_id || "");
         }
         setCheckingSaved(false);
       }
@@ -377,6 +417,14 @@ export default function PublicList() {
     };
   }, [authLoading, handle, isPublicHandlePath, listSlug, viewerUserId]);
 
+  function viewSavedCopy() {
+    if (savedTripId) {
+      navigate(`/trips/${savedTripId}`);
+      return;
+    }
+    navigate("/trips");
+  }
+
   async function toggleSave() {
     if (!list) return;
     if (!viewerUserId) {
@@ -384,34 +432,143 @@ export default function PublicList() {
       return;
     }
     if (saveWorking) return;
-    setSaveWorking(true);
-
     if (isSaved) {
-      const { error } = await supabase
-        .from("list_saves")
-        .delete()
-        .eq("user_id", viewerUserId)
-        .eq("list_id", list.id);
-      if (error) {
-        setToast("Couldn’t unsave right now.");
-      } else {
-        setIsSaved(false);
-        setList((prev) => (prev ? { ...prev, save_count: Math.max(0, Number(prev.save_count || 0) - 1) } : prev));
-        setToast("Removed");
-      }
-      setSaveWorking(false);
+      viewSavedCopy();
       return;
     }
 
-    const { error } = await supabase.from("list_saves").insert({ list_id: list.id });
-    if (error) {
-      setToast("Couldn’t save right now.");
-    } else {
+    setSaveWorking(true);
+    let createdTripId = "";
+    try {
+      const existingWithTrip = await supabase
+        .from("list_saves")
+        .select("list_id,saved_trip_id")
+        .eq("user_id", viewerUserId)
+        .eq("list_id", list.id)
+        .maybeSingle();
+
+      if (!existingWithTrip.error && existingWithTrip.data) {
+        setIsSaved(true);
+        setSavedTripId(existingWithTrip.data.saved_trip_id || "");
+        setToast("Already saved");
+        return;
+      }
+
+      const existingFallback =
+        existingWithTrip.error?.code === "42703"
+          ? await supabase
+              .from("list_saves")
+              .select("list_id")
+              .eq("user_id", viewerUserId)
+              .eq("list_id", list.id)
+              .maybeSingle()
+          : null;
+
+      if (existingFallback?.data) {
+        setIsSaved(true);
+        setSavedTripId("");
+        setToast("Already saved");
+        return;
+      }
+
+      const nextTripName = (list.title || "Saved list").trim() || "Saved list";
+      const nextTripType = normalizeTripType(list.section);
+      createdTripId = (await createTrip(nextTripName, nextTripType)) || "";
+      if (!createdTripId) {
+        setToast("Couldn’t create Stash copy.");
+        return;
+      }
+
+      const sorted = [...items].sort((a, b) => Number(a.rank_index || 0) - Number(b.rank_index || 0));
+      const now = Date.now();
+      const rows = sorted
+        .map((item, index) => {
+          const normalizedUrl = normalizeUrlForStash(item.url || "");
+          if (!normalizedUrl) return null;
+          const domain = item.domain_snapshot || getDomain(normalizedUrl);
+          const title = item.title_snapshot || domain || "Saved link";
+          const baseMeta = getMetaObject(item.meta_json);
+          const metadata = {
+            ...(baseMeta && typeof baseMeta === "object" ? baseMeta : {}),
+            source: "social_list",
+            source_list_id: list.id,
+            source_list_item_id: item.id,
+            source_owner_user_id: list.owner_user_id,
+            source_owner_handle: profile?.handle || handle || null,
+            source_list_slug: list.slug || null,
+            source_list_title: list.title || null,
+            source_rank_index: Number(item.rank_index || index + 1),
+            source_item_id: item.item_id || null,
+            source_price_snapshot: item.price_snapshot ?? null,
+            source_rating_snapshot: item.rating_snapshot ?? null,
+            source_section: list.section || "general",
+          };
+
+          return {
+            trip_id: createdTripId,
+            url: normalizedUrl,
+            original_url: normalizedUrl,
+            domain: domain || null,
+            platform: domain && domain.includes("airbnb.") ? "airbnb" : null,
+            item_type: "link",
+            image_url: item.image_snapshot || null,
+            metadata,
+            title,
+            note: item.note || null,
+            added_at: new Date(now - index * 1000).toISOString(),
+          };
+        })
+        .filter(Boolean);
+
+      if (rows.length > 0) {
+        const { error: itemsInsertError } = await supabase.from("trip_items").insert(rows);
+        if (itemsInsertError) {
+          await deleteTrip(createdTripId);
+          setToast("Couldn’t copy list items.");
+          return;
+        }
+      }
+
+      await reloadTripItems(createdTripId);
+
+      const withTripInsert = await supabase
+        .from("list_saves")
+        .insert({ user_id: viewerUserId, list_id: list.id, saved_trip_id: createdTripId });
+
+      let saveError = withTripInsert.error;
+      if (saveError && saveError.code === "42703") {
+        const fallbackInsert = await supabase
+          .from("list_saves")
+          .insert({ user_id: viewerUserId, list_id: list.id });
+        saveError = fallbackInsert.error;
+      }
+
+      if (saveError) {
+        if (saveError.code === "23505") {
+          await deleteTrip(createdTripId);
+          const existingAfterConflict = await supabase
+            .from("list_saves")
+            .select("list_id,saved_trip_id")
+            .eq("user_id", viewerUserId)
+            .eq("list_id", list.id)
+            .maybeSingle();
+          setIsSaved(true);
+          setSavedTripId(existingAfterConflict.data?.saved_trip_id || "");
+          setToast("Already saved");
+          return;
+        }
+        await deleteTrip(createdTripId);
+        setToast("Couldn’t save right now.");
+        return;
+      }
+
       setIsSaved(true);
+      setSavedTripId(createdTripId);
       setList((prev) => (prev ? { ...prev, save_count: Number(prev.save_count || 0) + 1 } : prev));
-      setToast("Saved");
+      setToast("Saved to your Stash");
+    } finally {
+      setSaveWorking(false);
     }
-    setSaveWorking(false);
   }
 
   async function handleShare() {
@@ -802,6 +959,11 @@ export default function PublicList() {
                   >
                     {checkingSaved ? "…" : saveWorking ? "Working…" : isSaved ? "Saved" : "Save"}
                   </button>
+                  {isSaved ? (
+                    <button className="miniBtn" type="button" onClick={viewSavedCopy} disabled={saveWorking || checkingSaved}>
+                      View in my Stash
+                    </button>
+                  ) : null}
                   <button className="miniBtn" type="button" onClick={handleShare}>
                     Share
                   </button>

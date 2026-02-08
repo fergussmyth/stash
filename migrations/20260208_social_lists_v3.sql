@@ -268,12 +268,19 @@ CREATE INDEX IF NOT EXISTS follows_following_time_idx
 CREATE TABLE IF NOT EXISTS public.list_saves (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE DEFAULT auth.uid(),
   list_id uuid NOT NULL REFERENCES public.lists(id) ON DELETE CASCADE,
+  saved_trip_id uuid REFERENCES public.trips(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, list_id)
 );
 
 CREATE INDEX IF NOT EXISTS list_saves_list_time_idx
   ON public.list_saves (list_id, created_at DESC);
+
+ALTER TABLE IF EXISTS public.list_saves
+  ADD COLUMN IF NOT EXISTS saved_trip_id uuid REFERENCES public.trips(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS list_saves_saved_trip_idx
+  ON public.list_saves (saved_trip_id);
 
 -- =========================
 -- Optional list views (for trending)
@@ -584,6 +591,27 @@ BEGIN
       FOR DELETE
       TO authenticated
       USING (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'list_saves' AND policyname = 'list_saves_update_saved_trip_own'
+  ) THEN
+    CREATE POLICY list_saves_update_saved_trip_own ON public.list_saves
+      FOR UPDATE
+      TO authenticated
+      USING (user_id = auth.uid())
+      WITH CHECK (
+        user_id = auth.uid()
+        AND (
+          saved_trip_id IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM public.trips t
+            WHERE t.id = list_saves.saved_trip_id
+              AND t.owner_id = auth.uid()
+          )
+        )
+      );
   END IF;
 
   -- List views: allow inserts (anon + auth), keep rows private by default (no select policy)
