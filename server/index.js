@@ -2,6 +2,7 @@ import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
 import { chromium } from "playwright";
+import { createSocialRouter } from "./social/routes.js";
 
 const app = express();
 app.use(cors());
@@ -508,6 +509,8 @@ app.post("/fetch-title", async (req, res) => {
   universalTitleCache.set(cleanedUrl, null);
   return safeRespond({ title: null });
 });
+
+app.use("/api/social", createSocialRouter());
 
 app.listen(5000, () => {
   console.log("✅ Server running on http://localhost:5000");

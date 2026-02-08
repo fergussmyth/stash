@@ -76,7 +76,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!user) return;
-    const payload = { id: user.id, email: user.email ?? null };
+    const payload = { id: user.id };
     const metadataDisplayName = user.user_metadata?.display_name;
     if (metadataDisplayName) {
       payload.display_name = metadataDisplayName;
