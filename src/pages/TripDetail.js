@@ -316,6 +316,95 @@ function extractAirbnbMetaFromTitle(title = "") {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_MS = 30 * DAY_MS;
+const ECOMMERCE_DOMAIN_HINTS = [
+  "amazon.",
+  "asos.",
+  "nike.",
+  "adidas.",
+  "ebay.",
+  "etsy.",
+  "target.",
+  "walmart.",
+  "bestbuy.",
+  "shopify.",
+  "zara.",
+  "hm.",
+  "uniqlo.",
+  "ssense.",
+  "net-a-porter.",
+  "farfetch.",
+];
+const TRAVEL_DOMAIN_HINTS = [
+  "airbnb.",
+  "booking.",
+  "expedia.",
+  "hotels.",
+  "priceline.",
+  "tripadvisor.",
+  "vrbo.",
+  "marriott.",
+  "hilton.",
+  "hyatt.",
+];
+
+function inferPrimaryAction(url = "", domain = "") {
+  const cleanDomain = String(domain || "").toLowerCase();
+  const cleanUrl = String(url || "").toLowerCase();
+
+  if (
+    cleanDomain.includes("youtube.com") ||
+    cleanDomain.includes("youtu.be") ||
+    cleanUrl.includes("/watch")
+  ) {
+    return "watch";
+  }
+
+  if (cleanDomain.includes("github.com")) {
+    return "reference";
+  }
+
+  if (
+    TRAVEL_DOMAIN_HINTS.some((entry) => cleanDomain.includes(entry)) ||
+    cleanUrl.includes("/hotel") ||
+    cleanUrl.includes("/hotels") ||
+    cleanUrl.includes("/stay") ||
+    cleanUrl.includes("/rooms")
+  ) {
+    return "book";
+  }
+
+  if (
+    cleanUrl.includes("/product") ||
+    cleanUrl.includes("/prd/") ||
+    cleanUrl.includes("cart") ||
+    cleanUrl.includes("checkout") ||
+    ECOMMERCE_DOMAIN_HINTS.some((entry) => cleanDomain.includes(entry))
+  ) {
+    return "buy";
+  }
+
+  return "read";
+}
+
+function getSocialSourceAttribution(item) {
+  const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const sourceType = String(metadata.source || "").toLowerCase();
+  const sourceListId = metadata.source_list_id;
+  const sourceHandle = String(metadata.source_owner_handle || "")
+    .trim()
+    .replace(/^@+/, "");
+  const sourceListSlug = String(metadata.source_list_slug || "").trim();
+  const sourceListTitle = String(metadata.source_list_title || "").trim();
+
+  if (!sourceListId && sourceType !== "social_list") return null;
+
+  const ownerLabel = sourceHandle ? `@${sourceHandle}` : "another creator";
+  const listLabel = sourceListTitle || "a public list";
+  const listPath = sourceHandle && sourceListSlug ? `/@${sourceHandle}/${sourceListSlug}` : "";
+  const sourceKey = sourceListId || (sourceHandle && sourceListSlug ? `${sourceHandle}/${sourceListSlug}` : "");
+
+  return { ownerLabel, listLabel, listPath, sourceKey };
+}
 
 function normalizePrimaryAction(value) {
   const action = (value || "").toLowerCase();
@@ -721,6 +810,27 @@ export default function TripDetail() {
     });
     return groups;
   }, [filteredDisplayItems, groupByDomain]);
+
+  const collectionSourceAttribution = useMemo(() => {
+    const sourceMap = new Map();
+    for (const item of trip?.items || []) {
+      const source = getSocialSourceAttribution(item);
+      if (!source) continue;
+      const key = source.sourceKey || `${source.ownerLabel}|${source.listLabel}`;
+      if (!sourceMap.has(key)) {
+        sourceMap.set(key, source);
+      }
+    }
+
+    if (!sourceMap.size) return null;
+
+    const uniqueSources = Array.from(sourceMap.values());
+    if (uniqueSources.length === 1) {
+      return { type: "single", source: uniqueSources[0], count: 1 };
+    }
+
+    return { type: "multiple", count: uniqueSources.length };
+  }, [trip?.items]);
 
   const hasActiveFilters =
     !!searchText.trim() ||
@@ -1377,7 +1487,9 @@ export default function TripDetail() {
     const isSelected = compareSelected.has(item.id);
     const disableSelect = compareSelected.size >= 4 && !isSelected;
     const isStale = isStaleItem(item);
-    const action = normalizePrimaryAction(item.primaryAction);
+    const action = normalizePrimaryAction(
+      item.primaryAction || inferPrimaryAction(item.airbnbUrl, domainLabel)
+    );
     const actionLabel = primaryActionLabel(action);
     const isChosen = item.decisionState === "chosen" || !!item.chosen;
 
@@ -1720,6 +1832,32 @@ export default function TripDetail() {
                 {linkCount} link{linkCount === 1 ? "" : "s"} · Updated {updatedAt} ·{" "}
                 {collectionSubtitle}
               </div>
+              {collectionSourceAttribution?.type === "single" && collectionSourceAttribution.source ? (
+                <div className="sourceAttributionRow collectionSourceAttribution">
+                  <span className="sourceAttributionLabel">From</span>
+                  <span className="sourceAttributionOwner">
+                    {collectionSourceAttribution.source.ownerLabel}
+                  </span>
+                  <span className="sourceAttributionDivider">•</span>
+                  {collectionSourceAttribution.source.listPath ? (
+                    <Link className="sourceAttributionLink" to={collectionSourceAttribution.source.listPath}>
+                      {collectionSourceAttribution.source.listLabel}
+                    </Link>
+                  ) : (
+                    <span className="sourceAttributionText">
+                      {collectionSourceAttribution.source.listLabel}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {collectionSourceAttribution?.type === "multiple" ? (
+                <div className="sourceAttributionRow collectionSourceAttribution">
+                  <span className="sourceAttributionLabel">From</span>
+                  <span className="sourceAttributionText">
+                    {collectionSourceAttribution.count} public lists
+                  </span>
+                </div>
+              ) : null}
               {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
                 <div className="sharedByLine">
                   Shared by {formatSharedBy(trip.ownerDisplayName)}
@@ -2232,7 +2370,9 @@ export default function TripDetail() {
                         fallbackMeta.chips
                       );
                       const isStale = isStaleItem(item);
-                      const action = normalizePrimaryAction(item.primaryAction);
+                      const action = normalizePrimaryAction(
+                        item.primaryAction || inferPrimaryAction(item.airbnbUrl, domainLabel)
+                      );
                       const actionLabel = primaryActionLabel(action);
                       const isChosen = item.decisionState === "chosen" || !!item.chosen;
                       return (

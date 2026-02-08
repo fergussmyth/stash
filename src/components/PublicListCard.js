@@ -19,9 +19,16 @@ function sectionLabel(section = "") {
   return "General";
 }
 
-export default function PublicListCard({ list, handle }) {
+export default function PublicListCard({
+  list,
+  handle,
+  isSaved = false,
+  isSaving = false,
+  onSave = null,
+  onViewSaved = null,
+}) {
   const [coverLoaded, setCoverLoaded] = useState(false);
-  const coverImageUrl = list.cover_image_url || "";
+  const coverImageUrl = list.cover_image_url || list.preview_image_url || "";
   const coverSeed = useMemo(() => `${list.id || ""}-${list.title || ""}`, [list.id, list.title]);
   const fallbackGradient = useMemo(() => makeFallbackGradient(coverSeed), [coverSeed]);
 
@@ -69,7 +76,9 @@ export default function PublicListCard({ list, handle }) {
     </>
   );
 
-  if (to) {
+  const canSave = typeof onSave === "function";
+
+  if (to && !canSave) {
     return (
       <Link className="collectionCard publicListCard" to={to} aria-label={list.title || "List"}>
         {cardContent}
@@ -77,9 +86,41 @@ export default function PublicListCard({ list, handle }) {
     );
   }
 
+  if (to && canSave) {
+    return (
+      <article className="collectionCard publicListCard withActions" aria-label={list.title || "List"}>
+        <Link className="publicListCardMain" to={to} aria-label={list.title || "List"}>
+          {cardContent}
+        </Link>
+        <div className="publicListCardActions">
+          <button className={isSaved ? "miniBtn active" : "miniBtn blue"} type="button" onClick={onSave} disabled={isSaving}>
+            {isSaving ? "Working…" : isSaved ? "Saved" : "Save"}
+          </button>
+          {isSaved && typeof onViewSaved === "function" ? (
+            <button className="miniBtn" type="button" onClick={onViewSaved} disabled={isSaving}>
+              View in my Stash
+            </button>
+          ) : null}
+        </div>
+      </article>
+    );
+  }
+
   return (
-    <div className="collectionCard publicListCard" aria-label={list.title || "List"}>
-      {cardContent}
-    </div>
+    <article className="collectionCard publicListCard withActions" aria-label={list.title || "List"}>
+      <div className="publicListCardMain">{cardContent}</div>
+      {canSave ? (
+        <div className="publicListCardActions">
+          <button className={isSaved ? "miniBtn active" : "miniBtn blue"} type="button" onClick={onSave} disabled={isSaving}>
+            {isSaving ? "Working…" : isSaved ? "Saved" : "Save"}
+          </button>
+          {isSaved && typeof onViewSaved === "function" ? (
+            <button className="miniBtn" type="button" onClick={onViewSaved} disabled={isSaving}>
+              View in my Stash
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
   );
 }

@@ -7,6 +7,7 @@ import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import PublicListCard from "../components/PublicListCard";
+import { hydrateListPreviewImages } from "../lib/socialDiscovery";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -124,7 +125,9 @@ export default function PublicProfile() {
         setLoadError("Could not load public lists right now.");
         setLists([]);
       } else {
-        setLists(listsData || []);
+        const hydratedLists = await hydrateListPreviewImages(listsData || []);
+        if (!active) return;
+        setLists(hydratedLists);
       }
       setLoadingLists(false);
 

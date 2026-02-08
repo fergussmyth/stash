@@ -7,6 +7,7 @@ import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import PublicListCard from "../components/PublicListCard";
 import { fetchFollowingFeed, fetchTrendingLists } from "../lib/socialDiscovery";
+import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -153,7 +154,7 @@ async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
 const FEED_PAGE_SIZE = 12;
 
 export default function Home() {
-  const { trips, createTrip, addItemToTrip, removeItem, user } = useTrips();
+  const { trips, createTrip, addItemToTrip, removeItem, user, deleteTrip, reloadTripItems } = useTrips();
   const textareaRef = useRef(null);
   const navigate = useNavigate();
 
@@ -187,6 +188,7 @@ export default function Home() {
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [feedHasMore, setFeedHasMore] = useState(false);
   const [feedError, setFeedError] = useState("");
+  const [feedSaveStateByListId, setFeedSaveStateByListId] = useState({});
   const feedRequestRef = useRef(0);
 
   const pendingTripKey = "pending_trip_create_name";
@@ -408,6 +410,41 @@ export default function Home() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const ids = [...new Set((feedLists || []).map((row) => row.id).filter(Boolean))];
+    if (!viewerUserId || !ids.length) {
+      if (!viewerUserId) {
+        setFeedSaveStateByListId({});
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    getSavedListsByIds({ viewerUserId, listIds: ids }).then(({ map }) => {
+      if (!active) return;
+      setFeedSaveStateByListId((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          const existing = next[id] || {};
+          if (existing.saving) continue;
+          next[id] = {
+            saved: map.has(id),
+            savedTripId: map.get(id)?.savedTripId || "",
+            saving: false,
+          };
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, feedLists]);
+
   async function loadMoreFeed() {
     const viewerUserId = user?.id || "";
     if (!viewerUserId || !feedHasMore || feedLoading || feedLoadingMore) return;
@@ -443,6 +480,162 @@ export default function Home() {
       setFeedLoadingMore(false);
       setFeedError("Could not load more right now.");
     }
+  }
+
+  async function viewFeedSavedList(list) {
+    const listId = list?.id || "";
+    if (!listId) return;
+    const savedTripId = feedSaveStateByListId[listId]?.savedTripId || "";
+    if (savedTripId) {
+      navigate(`/trips/${savedTripId}`);
+      return;
+    }
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+    if (feedSaveStateByListId[listId]?.saving) return;
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: true,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved" || result.status === "already_saved") {
+      const nextTripId = result.savedTripId || "";
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: nextTripId,
+          saving: false,
+        },
+      }));
+      if (result.status === "saved" && result.insertedSaveRow) {
+        setFeedLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      if (nextTripId) {
+        navigate(`/trips/${nextTripId}`);
+        return;
+      }
+      navigate("/trips");
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToastMsg(result.message || "Couldn’t open saved copy.");
+    setTimeout(() => setToastMsg(""), 1800);
+    navigate("/trips");
+  }
+
+  async function handleSaveFeedList(list) {
+    if (!list?.id) return;
+    const listId = list.id;
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+
+    const state = feedSaveStateByListId[listId] || {};
+    if (state.saving) return;
+    if (state.saved) {
+      await viewFeedSavedList(list);
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved") {
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      if (result.insertedSaveRow) {
+        setFeedLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      setToastMsg("Saved to your Stash");
+      setTimeout(() => setToastMsg(""), 1700);
+      return;
+    }
+
+    if (result.status === "already_saved") {
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      setToastMsg("Already saved");
+      setTimeout(() => setToastMsg(""), 1600);
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToastMsg(result.message || "Couldn’t save right now.");
+    setTimeout(() => setToastMsg(""), 1800);
   }
 
   function resetAll() {
@@ -1074,7 +1267,15 @@ export default function Home() {
                   <>
                     <div className="collectionsGrid homeFeedGrid">
                       {feedLists.map((list) => (
-                        <PublicListCard key={list.id} list={list} handle={list.owner_handle} />
+                        <PublicListCard
+                          key={list.id}
+                          list={list}
+                          handle={list.owner_handle}
+                          isSaved={!!feedSaveStateByListId[list.id]?.saved}
+                          isSaving={!!feedSaveStateByListId[list.id]?.saving}
+                          onSave={() => handleSaveFeedList(list)}
+                          onViewSaved={() => viewFeedSavedList(list)}
+                        />
                       ))}
                     </div>
                     {feedHasMore ? (

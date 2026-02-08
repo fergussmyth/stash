@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../hooks/useAuth";
 import { useTrips } from "../hooks/useTrips";
+import { savePublicListToStash } from "../lib/socialSave";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
@@ -59,26 +60,6 @@ function getDomain(url = "") {
   }
 }
 
-function normalizeTripType(section = "") {
-  const normalized = String(section || "").trim().toLowerCase();
-  if (normalized === "travel" || normalized === "fashion" || normalized === "general") {
-    return normalized;
-  }
-  return "general";
-}
-
-function normalizeUrlForStash(input = "") {
-  let value = String(input || "").trim();
-  if (!value) return "";
-  while (/[),.\]}>"']$/.test(value)) {
-    value = value.slice(0, -1);
-  }
-  if (!/^https?:\/\//i.test(value)) {
-    value = `https://${value}`;
-  }
-  return value;
-}
-
 function formatRating(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return "";
@@ -93,6 +74,91 @@ function getMetaObject(meta) {
   } catch {
     return null;
   }
+}
+
+function firstNonEmpty(values = []) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function extractImageFromMeta(meta) {
+  const parsed = getMetaObject(meta);
+  if (!parsed || typeof parsed !== "object") return "";
+
+  const direct = firstNonEmpty([
+    parsed.image,
+    parsed.image_url,
+    parsed.imageUrl,
+    parsed.og_image,
+    parsed.ogImage,
+    parsed.thumbnail,
+    parsed.thumbnail_url,
+    parsed.thumbnailUrl,
+    parsed.photo,
+    parsed.photo_url,
+    parsed.photoUrl,
+  ]);
+  if (direct) return direct;
+
+  if (Array.isArray(parsed.images)) {
+    for (const image of parsed.images) {
+      if (typeof image === "string" && image.trim()) return image.trim();
+      if (image && typeof image === "object") {
+        const nested = firstNonEmpty([image.url, image.src, image.image, image.image_url]);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  if (parsed.og && typeof parsed.og === "object") {
+    const ogImage = firstNonEmpty([parsed.og.image, parsed.og.image_url, parsed.og.imageUrl]);
+    if (ogImage) return ogImage;
+  }
+
+  return "";
+}
+
+function resolveListItemImage(item) {
+  const snapshotImage = String(item?.image_snapshot || "").trim();
+  if (snapshotImage) return snapshotImage;
+
+  const metaImage = extractImageFromMeta(item?.meta_json);
+  if (metaImage) return metaImage;
+  return "";
+}
+
+async function fetchLinkPreviewWithTimeout(url, timeoutMs = 3800) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch("/fetch-link-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    return {
+      title: String(data?.title || "").trim(),
+      imageUrl: String(data?.imageUrl || "").trim(),
+    };
+  } catch {
+    return { title: "", imageUrl: "" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function shouldReplaceItemTitle(existingTitle = "", itemUrl = "") {
+  const normalized = String(existingTitle || "").trim();
+  if (!normalized) return true;
+  if (normalized.toLowerCase() === "saved link") return true;
+  const domain = getDomain(itemUrl).toLowerCase();
+  if (domain && normalized.toLowerCase() === domain) return true;
+  return false;
 }
 
 function buildMetaChips(item) {
@@ -252,6 +318,7 @@ export default function PublicList() {
   const [dragOverItemId, setDragOverItemId] = useState("");
 
   const viewTrackedRef = useRef(new Set());
+  const previewAttemptedItemIdsRef = useRef(new Set());
   const [coverLoaded, setCoverLoaded] = useState(false);
 
   const categoryCounts = useMemo(
@@ -277,7 +344,14 @@ export default function PublicList() {
     [list?.id, list?.title, profile?.id]
   );
   const fallbackGradient = useMemo(() => makeCoverGradient(coverSeed), [coverSeed]);
-  const coverImageUrl = list?.cover_image_url || items?.[0]?.image_snapshot || "";
+  const firstItemCoverImage = useMemo(() => {
+    for (const item of items || []) {
+      const image = resolveListItemImage(item);
+      if (image) return image;
+    }
+    return "";
+  }, [items]);
+  const coverImageUrl = list?.cover_image_url || firstItemCoverImage || "";
   const isGradientCover =
     (coverImageUrl || "").startsWith("linear-gradient") || (coverImageUrl || "").startsWith("radial-gradient");
   const isImageCover =
@@ -417,12 +491,102 @@ export default function PublicList() {
     };
   }, [authLoading, handle, isPublicHandlePath, listSlug, viewerUserId]);
 
-  function viewSavedCopy() {
+  useEffect(() => {
+    previewAttemptedItemIdsRef.current = new Set();
+  }, [list?.id]);
+
+  useEffect(() => {
+    if (!isOwner || !list?.id || loadingItems || !items?.length) return;
+
+    const candidates = items
+      .filter((item) => item?.id && item?.url && !item?.image_snapshot)
+      .filter((item) => !previewAttemptedItemIdsRef.current.has(item.id))
+      .slice(0, 8);
+
+    if (!candidates.length) return;
+
+    let cancelled = false;
+
+    async function enrichMissingPreviews() {
+      for (const item of candidates) {
+        if (cancelled) return;
+        previewAttemptedItemIdsRef.current.add(item.id);
+
+        const preview = await fetchLinkPreviewWithTimeout(item.url, 4200);
+        if (cancelled) return;
+
+        const nextTitle = preview.title;
+        const nextImage = preview.imageUrl;
+        const patch = {};
+
+        if (nextImage) {
+          patch.image_snapshot = nextImage;
+        }
+        if (nextTitle && shouldReplaceItemTitle(item.title_snapshot, item.url)) {
+          patch.title_snapshot = nextTitle;
+        }
+
+        if (Object.keys(patch).length === 0) continue;
+
+        const { error } = await supabase
+          .from("list_items")
+          .update(patch)
+          .eq("id", item.id)
+          .eq("list_id", list.id);
+
+        if (cancelled) return;
+        if (error) continue;
+
+        setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, ...patch } : row)));
+      }
+    }
+
+    enrichMissingPreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, list?.id, items, loadingItems]);
+
+  async function viewSavedCopy() {
+    if (saveWorking) return;
     if (savedTripId) {
       navigate(`/trips/${savedTripId}`);
       return;
     }
-    navigate("/trips");
+    if (!viewerUserId || !list) {
+      navigate("/trips");
+      return;
+    }
+
+    setSaveWorking(true);
+    try {
+      const result = await savePublicListToStash({
+        viewerUserId,
+        list,
+        ownerHandle: profile?.handle || handle || "",
+        listItems: items,
+        createTrip,
+        deleteTrip,
+        reloadTripItems,
+      });
+
+      if ((result.status === "saved" || result.status === "already_saved") && result.savedTripId) {
+        setIsSaved(true);
+        setSavedTripId(result.savedTripId);
+        if (result.status === "saved" && result.insertedSaveRow) {
+          setList((prev) => (prev ? { ...prev, save_count: Number(prev.save_count || 0) + 1 } : prev));
+        }
+        navigate(`/trips/${result.savedTripId}`);
+        return;
+      }
+
+      if (result.status === "error") {
+        setToast(result.message || "Couldn’t open saved copy right now.");
+      }
+      navigate("/trips");
+    } finally {
+      setSaveWorking(false);
+    }
   }
 
   async function toggleSave() {
@@ -433,139 +597,40 @@ export default function PublicList() {
     }
     if (saveWorking) return;
     if (isSaved) {
-      viewSavedCopy();
+      await viewSavedCopy();
       return;
     }
 
     setSaveWorking(true);
-    let createdTripId = "";
     try {
-      const existingWithTrip = await supabase
-        .from("list_saves")
-        .select("list_id,saved_trip_id")
-        .eq("user_id", viewerUserId)
-        .eq("list_id", list.id)
-        .maybeSingle();
+      const result = await savePublicListToStash({
+        viewerUserId,
+        list,
+        ownerHandle: profile?.handle || handle || "",
+        listItems: items,
+        createTrip,
+        deleteTrip,
+        reloadTripItems,
+      });
 
-      if (!existingWithTrip.error && existingWithTrip.data) {
+      if (result.status === "saved") {
         setIsSaved(true);
-        setSavedTripId(existingWithTrip.data.saved_trip_id || "");
+        setSavedTripId(result.savedTripId || "");
+        if (result.insertedSaveRow) {
+          setList((prev) => (prev ? { ...prev, save_count: Number(prev.save_count || 0) + 1 } : prev));
+        }
+        setToast("Saved to your Stash");
+        return;
+      }
+
+      if (result.status === "already_saved") {
+        setIsSaved(true);
+        setSavedTripId(result.savedTripId || "");
         setToast("Already saved");
         return;
       }
 
-      const existingFallback =
-        existingWithTrip.error?.code === "42703"
-          ? await supabase
-              .from("list_saves")
-              .select("list_id")
-              .eq("user_id", viewerUserId)
-              .eq("list_id", list.id)
-              .maybeSingle()
-          : null;
-
-      if (existingFallback?.data) {
-        setIsSaved(true);
-        setSavedTripId("");
-        setToast("Already saved");
-        return;
-      }
-
-      const nextTripName = (list.title || "Saved list").trim() || "Saved list";
-      const nextTripType = normalizeTripType(list.section);
-      createdTripId = (await createTrip(nextTripName, nextTripType)) || "";
-      if (!createdTripId) {
-        setToast("Couldn’t create Stash copy.");
-        return;
-      }
-
-      const sorted = [...items].sort((a, b) => Number(a.rank_index || 0) - Number(b.rank_index || 0));
-      const now = Date.now();
-      const rows = sorted
-        .map((item, index) => {
-          const normalizedUrl = normalizeUrlForStash(item.url || "");
-          if (!normalizedUrl) return null;
-          const domain = item.domain_snapshot || getDomain(normalizedUrl);
-          const title = item.title_snapshot || domain || "Saved link";
-          const baseMeta = getMetaObject(item.meta_json);
-          const metadata = {
-            ...(baseMeta && typeof baseMeta === "object" ? baseMeta : {}),
-            source: "social_list",
-            source_list_id: list.id,
-            source_list_item_id: item.id,
-            source_owner_user_id: list.owner_user_id,
-            source_owner_handle: profile?.handle || handle || null,
-            source_list_slug: list.slug || null,
-            source_list_title: list.title || null,
-            source_rank_index: Number(item.rank_index || index + 1),
-            source_item_id: item.item_id || null,
-            source_price_snapshot: item.price_snapshot ?? null,
-            source_rating_snapshot: item.rating_snapshot ?? null,
-            source_section: list.section || "general",
-          };
-
-          return {
-            trip_id: createdTripId,
-            url: normalizedUrl,
-            original_url: normalizedUrl,
-            domain: domain || null,
-            platform: domain && domain.includes("airbnb.") ? "airbnb" : null,
-            item_type: "link",
-            image_url: item.image_snapshot || null,
-            metadata,
-            title,
-            note: item.note || null,
-            added_at: new Date(now - index * 1000).toISOString(),
-          };
-        })
-        .filter(Boolean);
-
-      if (rows.length > 0) {
-        const { error: itemsInsertError } = await supabase.from("trip_items").insert(rows);
-        if (itemsInsertError) {
-          await deleteTrip(createdTripId);
-          setToast("Couldn’t copy list items.");
-          return;
-        }
-      }
-
-      await reloadTripItems(createdTripId);
-
-      const withTripInsert = await supabase
-        .from("list_saves")
-        .insert({ user_id: viewerUserId, list_id: list.id, saved_trip_id: createdTripId });
-
-      let saveError = withTripInsert.error;
-      if (saveError && saveError.code === "42703") {
-        const fallbackInsert = await supabase
-          .from("list_saves")
-          .insert({ user_id: viewerUserId, list_id: list.id });
-        saveError = fallbackInsert.error;
-      }
-
-      if (saveError) {
-        if (saveError.code === "23505") {
-          await deleteTrip(createdTripId);
-          const existingAfterConflict = await supabase
-            .from("list_saves")
-            .select("list_id,saved_trip_id")
-            .eq("user_id", viewerUserId)
-            .eq("list_id", list.id)
-            .maybeSingle();
-          setIsSaved(true);
-          setSavedTripId(existingAfterConflict.data?.saved_trip_id || "");
-          setToast("Already saved");
-          return;
-        }
-        await deleteTrip(createdTripId);
-        setToast("Couldn’t save right now.");
-        return;
-      }
-
-      setIsSaved(true);
-      setSavedTripId(createdTripId);
-      setList((prev) => (prev ? { ...prev, save_count: Number(prev.save_count || 0) + 1 } : prev));
-      setToast("Saved to your Stash");
+      setToast(result.message || "Couldn’t save right now.");
     } finally {
       setSaveWorking(false);
     }
@@ -989,7 +1054,7 @@ export default function PublicList() {
                     const domain = item.domain_snapshot || getDomain(item.url || "");
                     const rating = formatRating(item.rating_snapshot);
                     const chips = buildMetaChips(item);
-                    const imgUrl = item.image_snapshot || "";
+                    const imgUrl = resolveListItemImage(item);
                     const canMoveUp = isOwner && index > 0 && !reorderWorking;
                     const canMoveDown = isOwner && index < items.length - 1 && !reorderWorking;
                     return (

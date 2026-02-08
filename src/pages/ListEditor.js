@@ -65,7 +65,7 @@ function decodeHtmlEntities(text = "") {
   return el.value;
 }
 
-async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
+async function fetchPreviewWithTimeout(endpoint, url, timeoutMs = 2800) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -76,9 +76,12 @@ async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
       signal: controller.signal,
     });
     const data = await res.json();
-    return data?.title || null;
+    return {
+      title: String(data?.title || "").trim(),
+      imageUrl: String(data?.imageUrl || "").trim(),
+    };
   } catch {
-    return null;
+    return { title: "", imageUrl: "" };
   } finally {
     clearTimeout(timer);
   }
@@ -919,12 +922,21 @@ export default function ListEditor() {
     setUrlInput("");
     setAddingUrl(false);
 
-    const endpoint = url.includes("airbnb.") ? "/fetch-airbnb-title" : "/fetch-title";
-    fetchTitleWithTimeout(endpoint, url, 2800).then(async (foundTitle) => {
-      const decoded = decodeHtmlEntities(foundTitle || "").trim();
-      if (!decoded || decoded === fallbackTitle) return;
-      await supabase.from("list_items").update({ title_snapshot: decoded }).eq("id", data.id);
-      setItems((prev) => prev.map((it) => (it.id === data.id ? { ...it, title_snapshot: decoded } : it)));
+    fetchPreviewWithTimeout("/fetch-link-preview", url, 3600).then(async (preview) => {
+      const decodedTitle = decodeHtmlEntities(preview.title || "").trim();
+      const nextImage = String(preview.imageUrl || "").trim();
+      const patch = {};
+
+      if (decodedTitle && decodedTitle !== fallbackTitle) {
+        patch.title_snapshot = decodedTitle;
+      }
+      if (nextImage) {
+        patch.image_snapshot = nextImage;
+      }
+      if (Object.keys(patch).length === 0) return;
+
+      await supabase.from("list_items").update(patch).eq("id", data.id);
+      setItems((prev) => prev.map((it) => (it.id === data.id ? { ...it, ...patch } : it)));
     });
   }
 

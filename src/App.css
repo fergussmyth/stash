@@ -6210,6 +6210,56 @@ h1 span {
   gap: 6px;
 }
 
+.sourceAttributionRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(191, 219, 254, 0.78);
+}
+
+.sourceAttributionLabel {
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sourceAttributionOwner {
+  color: rgba(219, 234, 254, 0.95);
+  font-weight: 700;
+}
+
+.sourceAttributionDivider {
+  color: rgba(148, 163, 184, 0.68);
+}
+
+.sourceAttributionText,
+.sourceAttributionLink {
+  color: rgba(191, 219, 254, 0.9);
+  font-weight: 700;
+}
+
+.sourceAttributionLink {
+  text-decoration: none;
+}
+
+.sourceAttributionLink:hover {
+  text-decoration: underline;
+}
+
+.compareSourceAttribution {
+  margin-top: 4px;
+}
+
+.collectionSourceAttribution {
+  margin-top: 8px;
+}
+
 .tagPill {
   border: none;
   border-radius: 999px;
@@ -7608,6 +7658,29 @@ h1 span {
   display: block;
   text-decoration: none;
   color: inherit;
+}
+
+.publicListCard.withActions {
+  display: flex;
+  flex-direction: column;
+}
+
+.publicListCardMain {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.publicListCardActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 14px 14px;
+}
+
+.publicListCardActions .miniBtn {
+  padding: 8px 12px;
 }
 
 .listEditorHandleRow {

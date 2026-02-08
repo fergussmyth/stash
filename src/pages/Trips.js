@@ -202,13 +202,28 @@ export default function Trips() {
 
   useEffect(() => {
     if (typeof window === "undefined" || loading) return;
-    if (process.env.NODE_ENV !== "production") {
-      window.localStorage.removeItem("collectionsIntroDismissed");
+    if (!user?.id) {
+      setShowCollectionsIntro(false);
+      return;
     }
-    const dismissed = window.localStorage.getItem("collectionsIntroDismissed") === "true";
-    const shouldShow = !dismissed || trips.length === 0;
-    setShowCollectionsIntro(shouldShow);
-  }, [trips.length, loading]);
+
+    const introKey = `collectionsIntroDismissed:${user.id}`;
+    const legacyDismissed = window.localStorage.getItem("collectionsIntroDismissed") === "true";
+    if (legacyDismissed && window.localStorage.getItem(introKey) !== "true") {
+      window.localStorage.setItem(introKey, "true");
+    }
+
+    const dismissed = window.localStorage.getItem(introKey) === "true";
+    if (trips.length > 0) {
+      if (!dismissed) {
+        window.localStorage.setItem(introKey, "true");
+      }
+      setShowCollectionsIntro(false);
+      return;
+    }
+
+    setShowCollectionsIntro(!dismissed);
+  }, [trips.length, loading, user?.id]);
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -346,8 +361,8 @@ export default function Trips() {
         open={showCollectionsIntro}
         isEmpty={trips.length === 0}
         onClose={() => {
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem("collectionsIntroDismissed", "true");
+          if (typeof window !== "undefined" && user?.id) {
+            window.localStorage.setItem(`collectionsIntroDismissed:${user.id}`, "true");
           }
           setShowCollectionsIntro(false);
         }}

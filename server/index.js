@@ -10,6 +10,7 @@ app.use(express.json());
 
 const titleCache = new Map();
 const universalTitleCache = new Map();
+const previewCache = new Map();
 
 function cleanAirbnbUrl(url) {
   try {
@@ -81,6 +82,69 @@ function extractJsonLdTitle(html = "") {
       // ignore bad JSON-LD
     }
   }
+  return "";
+}
+
+function toAbsoluteUrl(value = "", base = "") {
+  try {
+    return new URL(value, base).toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractImageFromHtml(html = "", baseUrl = "") {
+  const patterns = [
+    /<meta[^>]+property=["']og:image:secure_url["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+name=["']twitter:image:src["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<link[^>]+rel=["']image_src["'][^>]*href=["']([^"']+)["'][^>]*>/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const raw = match?.[1] ? String(match[1]).trim() : "";
+    if (!raw) continue;
+    const absolute = toAbsoluteUrl(raw, baseUrl);
+    if (!absolute || !/^https?:\/\//i.test(absolute)) continue;
+    return absolute;
+  }
+  return "";
+}
+
+function extractJsonLdImage(html = "", baseUrl = "") {
+  const scripts = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi);
+  if (!scripts) return "";
+
+  for (const script of scripts) {
+    const jsonText = script.replace(/^[\s\S]*?>/, "").replace(/<\/script>[\s\S]*$/, "").trim();
+    if (!jsonText) continue;
+
+    try {
+      const parsed = JSON.parse(jsonText);
+      const candidates = Array.isArray(parsed) ? parsed : [parsed];
+      for (const entry of candidates) {
+        if (!entry || typeof entry !== "object") continue;
+
+        const directImage = Array.isArray(entry.image)
+          ? String(entry.image[0] || "").trim()
+          : typeof entry.image === "string"
+          ? entry.image.trim()
+          : typeof entry.image?.url === "string"
+          ? entry.image.url.trim()
+          : "";
+
+        if (directImage) {
+          const absolute = toAbsoluteUrl(directImage, baseUrl);
+          if (absolute && /^https?:\/\//i.test(absolute)) return absolute;
+        }
+      }
+    } catch {
+      // ignore bad JSON-LD blocks
+    }
+  }
+
   return "";
 }
 
@@ -350,6 +414,184 @@ app.post("/fetch-airbnb-title", async (req, res) => {
       // ignore close errors
     }
   }
+});
+
+app.post("/fetch-link-preview", async (req, res) => {
+  const { url } = req.body;
+
+  if (!url || typeof url !== "string") {
+    return res.json({ title: null, imageUrl: null });
+  }
+
+  const cleanedUrl = url.trim();
+  if (!/^https?:\/\//i.test(cleanedUrl)) {
+    return res.json({ title: null, imageUrl: null });
+  }
+
+  if (previewCache.has(cleanedUrl)) {
+    return res.json(previewCache.get(cleanedUrl));
+  }
+
+  const overallTimeoutMs = 8500;
+  let responded = false;
+  const safeRespond = (payload) => {
+    if (responded) return;
+    responded = true;
+    res.json(payload);
+  };
+
+  const normalizePreviewPayload = (payload = {}) => ({
+    title: payload?.title ? String(payload.title).trim() : null,
+    imageUrl: payload?.imageUrl ? String(payload.imageUrl).trim() : null,
+  });
+
+  const respondAndCache = (payload = {}) => {
+    const normalized = normalizePreviewPayload(payload);
+    previewCache.set(cleanedUrl, normalized);
+    safeRespond(normalized);
+  };
+
+  const trySimpleFetch = async () => {
+    const response = await fetch(cleanedUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    if (!response.ok) return { title: "", imageUrl: "" };
+    const html = await response.text();
+    const finalUrl = response.url || cleanedUrl;
+
+    let title = extractTitleFromHtml(html);
+    if (!title) {
+      title = extractJsonLdTitle(html);
+    }
+    if (!title) {
+      let host = "";
+      try {
+        host = new URL(finalUrl).hostname.toLowerCase();
+      } catch {
+        host = "";
+      }
+      if (host.includes("asos.com")) {
+        title = extractAsosTitleFromHtml(html);
+      }
+    }
+
+    const imageUrl = extractImageFromHtml(html, finalUrl) || extractJsonLdImage(html, finalUrl) || "";
+    return {
+      title: !looksLikeNotFoundTitle(title) ? title : "",
+      imageUrl,
+    };
+  };
+
+  const tryPlaywright = async () => {
+    let browser;
+    let page;
+    try {
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      });
+      page = await context.newPage();
+      await page.goto(cleanedUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 4500 });
+      } catch {
+        // best effort
+      }
+
+      const finalUrl = page.url() || cleanedUrl;
+      const ogTitle = await page
+        .$eval('meta[property="og:title"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const twitterTitle = await page
+        .$eval('meta[name="twitter:title"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const docTitle = (await page.title().catch(() => "")) || "";
+
+      const ogImage = await page
+        .$eval('meta[property="og:image:secure_url"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const ogImageFallback = await page
+        .$eval('meta[property="og:image"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const twitterImage = await page
+        .$eval('meta[name="twitter:image:src"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+      const twitterImageFallback = await page
+        .$eval('meta[name="twitter:image"]', (el) => el.getAttribute("content"))
+        .catch(() => null);
+
+      let title = (ogTitle || twitterTitle || docTitle || "").trim();
+      if (!title) {
+        const html = await page.content().catch(() => "");
+        if (html) {
+          title = extractJsonLdTitle(html);
+          if (!title && finalUrl.includes("asos.com")) {
+            title = extractAsosTitleFromHtml(html);
+          }
+        }
+      }
+
+      let imageUrl = (ogImage || ogImageFallback || twitterImage || twitterImageFallback || "").trim();
+      if (imageUrl) {
+        imageUrl = toAbsoluteUrl(imageUrl, finalUrl);
+      }
+      if (!imageUrl) {
+        const html = await page.content().catch(() => "");
+        if (html) {
+          imageUrl = extractJsonLdImage(html, finalUrl);
+        }
+      }
+
+      return {
+        title: !looksLikeNotFoundTitle(title) ? title : "",
+        imageUrl,
+      };
+    } finally {
+      try {
+        if (page) await page.close();
+      } catch {}
+      try {
+        if (browser) await browser.close();
+      } catch {}
+    }
+  };
+
+  const timeoutPromise = new Promise((resolve) =>
+    setTimeout(() => resolve("__timeout__"), overallTimeoutMs)
+  );
+
+  try {
+    const quickPreview = await Promise.race([trySimpleFetch(), timeoutPromise]);
+    if (
+      quickPreview &&
+      quickPreview !== "__timeout__" &&
+      (quickPreview.title || quickPreview.imageUrl)
+    ) {
+      return respondAndCache(quickPreview);
+    }
+
+    const richPreview = await Promise.race([tryPlaywright(), timeoutPromise]);
+    if (
+      richPreview &&
+      richPreview !== "__timeout__" &&
+      (richPreview.title || richPreview.imageUrl)
+    ) {
+      return respondAndCache(richPreview);
+    }
+  } catch (err) {
+    console.log("FETCH PREVIEW ERROR:", err?.message);
+  }
+
+  return respondAndCache({ title: null, imageUrl: null });
 });
 
 app.post("/fetch-title", async (req, res) => {

@@ -7,6 +7,7 @@ import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import PublicListCard from "../components/PublicListCard";
 import { fetchTrendingLists } from "../lib/socialDiscovery";
+import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -19,13 +20,15 @@ const FILTERS = [
 
 export default function Explore() {
   const { user } = useAuth();
-  const { trips } = useTrips();
+  const { trips, createTrip, deleteTrip, reloadTripItems } = useTrips();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sectionFilter, setSectionFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [searchValue, setSearchValue] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
   const [lists, setLists] = useState([]);
+  const [saveStateByListId, setSaveStateByListId] = useState({});
   const [loadingLists, setLoadingLists] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -48,6 +51,11 @@ export default function Explore() {
     }, 220);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  function setToast(message) {
+    setToastMsg(message);
+    setTimeout(() => setToastMsg(""), 1700);
+  }
 
   useEffect(() => {
     let active = true;
@@ -115,6 +123,195 @@ export default function Explore() {
     }
   }
 
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const ids = [...new Set((lists || []).map((row) => row.id).filter(Boolean))];
+    if (!viewerUserId || !ids.length) {
+      if (!viewerUserId) {
+        setSaveStateByListId({});
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    getSavedListsByIds({ viewerUserId, listIds: ids }).then(({ map }) => {
+      if (!active) return;
+      setSaveStateByListId((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          const existing = next[id] || {};
+          if (existing.saving) continue;
+          const saved = map.has(id);
+          const savedTripId = map.get(id)?.savedTripId || "";
+          next[id] = {
+            saved,
+            savedTripId,
+            saving: false,
+          };
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, lists]);
+
+  async function viewSavedList(list) {
+    const listId = list?.id || "";
+    if (!listId) return;
+    const savedTripId = saveStateByListId[listId]?.savedTripId || "";
+    if (savedTripId) {
+      navigate(`/trips/${savedTripId}`);
+      return;
+    }
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+    if (saveStateByListId[listId]?.saving) return;
+
+    setSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: true,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved" || result.status === "already_saved") {
+      const nextTripId = result.savedTripId || "";
+      setSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: nextTripId,
+          saving: false,
+        },
+      }));
+      if (result.status === "saved" && result.insertedSaveRow) {
+        setLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      if (nextTripId) {
+        navigate(`/trips/${nextTripId}`);
+        return;
+      }
+      navigate("/trips");
+      return;
+    }
+
+    setSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToast(result.message || "Couldn’t open saved copy.");
+    navigate("/trips");
+  }
+
+  async function handleSaveList(list) {
+    if (!list?.id) return;
+    const listId = list.id;
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+
+    const state = saveStateByListId[listId] || {};
+    if (state.saving) return;
+    if (state.saved) {
+      await viewSavedList(list);
+      return;
+    }
+
+    setSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved") {
+      setSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      if (result.insertedSaveRow) {
+        setLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      setToast("Saved to your Stash");
+      return;
+    }
+
+    if (result.status === "already_saved") {
+      setSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      setToast("Already saved");
+      return;
+    }
+
+    setSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToast(result.message || "Couldn’t save right now.");
+  }
+
   const subtitle = searchValue
     ? `Results for "${searchValue}"`
     : "Trending public lists across Stash.";
@@ -158,6 +355,7 @@ export default function Explore() {
         isSidebarOpen={sidebarOpen}
         onCloseSidebar={() => setSidebarOpen(false)}
       >
+        {toastMsg && <div className="toast">{toastMsg}</div>}
         <section className="panel p-5 collectionsPanel listPanel fullWidth">
           <div className="panelContent">
             <div className="exploreFilters" role="tablist" aria-label="Explore filters">
@@ -204,7 +402,15 @@ export default function Explore() {
               <>
                 <div className="collectionsGrid">
                   {lists.map((list) => (
-                    <PublicListCard key={list.id} list={list} handle={list.owner_handle} />
+                    <PublicListCard
+                      key={list.id}
+                      list={list}
+                      handle={list.owner_handle}
+                      isSaved={!!saveStateByListId[list.id]?.saved}
+                      isSaving={!!saveStateByListId[list.id]?.saving}
+                      onSave={() => handleSaveList(list)}
+                      onViewSaved={() => viewSavedList(list)}
+                    />
                   ))}
                 </div>
                 {hasMore ? (

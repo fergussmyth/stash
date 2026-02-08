@@ -3,6 +3,120 @@ import { supabase } from "./supabaseClient";
 const LIST_SELECT =
   "id,owner_user_id,section,title,subtitle,slug,cover_image_url,visibility,is_ranked,ranked_size,pinned_order,save_count,view_count,last_saved_at,last_viewed_at,created_at,updated_at";
 
+function parseMetaObject(meta) {
+  if (!meta) return null;
+  if (typeof meta === "object") return meta;
+  try {
+    return JSON.parse(String(meta));
+  } catch {
+    return null;
+  }
+}
+
+function firstNonEmpty(values = []) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function extractImageFromMeta(meta) {
+  const parsed = parseMetaObject(meta);
+  if (!parsed || typeof parsed !== "object") return "";
+  const direct = firstNonEmpty([
+    parsed.image,
+    parsed.image_url,
+    parsed.imageUrl,
+    parsed.og_image,
+    parsed.ogImage,
+    parsed.thumbnail,
+    parsed.thumbnail_url,
+    parsed.thumbnailUrl,
+    parsed.photo,
+    parsed.photo_url,
+    parsed.photoUrl,
+    parsed.hero_image,
+    parsed.heroImage,
+  ]);
+  if (direct) return direct;
+
+  if (Array.isArray(parsed.images)) {
+    for (const image of parsed.images) {
+      if (typeof image === "string" && image.trim()) return image.trim();
+      if (image && typeof image === "object") {
+        const nested = firstNonEmpty([image.url, image.src, image.image, image.image_url]);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  if (parsed.og && typeof parsed.og === "object") {
+    const ogImage = firstNonEmpty([parsed.og.image, parsed.og.image_url, parsed.og.imageUrl]);
+    if (ogImage) return ogImage;
+  }
+
+  return "";
+}
+
+function resolveListItemPreviewImage(row) {
+  const snapshot = String(row?.image_snapshot || "").trim();
+  if (snapshot) return snapshot;
+
+  const metaImage = extractImageFromMeta(row?.meta_json);
+  if (metaImage) return metaImage;
+  return "";
+}
+
+async function fetchListPreviewImageMap(listIds = []) {
+  const ids = [...new Set((listIds || []).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+
+  const { data, error } = await supabase
+    .from("list_items")
+    .select("list_id,image_snapshot,domain_snapshot,url,meta_json,rank_index,created_at")
+    .in("list_id", ids)
+    .order("list_id", { ascending: true })
+    .order("rank_index", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error || !Array.isArray(data)) return map;
+
+  for (const row of data) {
+    const listId = row?.list_id;
+    if (!listId || map.has(listId)) continue;
+    const imageUrl = resolveListItemPreviewImage(row);
+    if (!imageUrl) continue;
+    map.set(listId, imageUrl);
+  }
+
+  return map;
+}
+
+export async function hydrateListPreviewImages(rows = []) {
+  const listRows = Array.isArray(rows) ? rows : [];
+  if (!listRows.length) return listRows;
+
+  const targetIds = listRows
+    .filter((row) => !String(row?.cover_image_url || "").trim())
+    .map((row) => row?.id)
+    .filter(Boolean);
+
+  if (!targetIds.length) return listRows;
+
+  const previewMap = await fetchListPreviewImageMap(targetIds);
+  if (!previewMap.size) return listRows;
+
+  return listRows.map((row) => {
+    const existingCover = String(row?.cover_image_url || "").trim();
+    if (existingCover) return row;
+    const preview = previewMap.get(row?.id) || "";
+    if (!preview) return row;
+    return { ...row, preview_image_url: preview };
+  });
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -208,8 +322,10 @@ export async function fetchTrendingLists({
 
   if (!rpcError && Array.isArray(rpcData)) {
     const hasMore = rpcData.length > safeLimit;
+    const mappedRows = rpcData.slice(0, safeLimit).map(mapRpcRow);
+    const hydratedRows = await hydrateListPreviewImages(mappedRows);
     return {
-      lists: rpcData.slice(0, safeLimit).map(mapRpcRow),
+      lists: hydratedRows,
       hasMore,
       source: "rpc",
     };
@@ -240,9 +356,10 @@ export async function fetchTrendingLists({
     });
 
   const paged = enriched.slice(safeOffset, safeOffset + safeLimit + 1);
-  const hasMore = paged.length > safeLimit;
+  const hydratedPaged = await hydrateListPreviewImages(paged);
+  const hasMore = hydratedPaged.length > safeLimit;
   return {
-    lists: paged.slice(0, safeLimit),
+    lists: hydratedPaged.slice(0, safeLimit),
     hasMore,
     source: "fallback",
   };
@@ -296,7 +413,7 @@ export async function fetchFollowingFeed({
   const hasMore = rows.length > safeLimit;
   const pagedRows = rows.slice(0, safeLimit);
   const profileMap = await fetchProfilesMap(pagedRows.map((row) => row.owner_user_id));
-  const lists = enrichWithOwner(pagedRows, profileMap);
+  const lists = await hydrateListPreviewImages(enrichWithOwner(pagedRows, profileMap));
   return {
     lists,
     hasMore,
