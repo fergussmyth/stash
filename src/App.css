@@ -7323,6 +7323,246 @@ h1 span {
   justify-content: flex-end;
 }
 
+.publicProfilePage {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.publicProfilePage .collectionsTopbarSearch {
+  display: none;
+}
+
+.publicProfilePage .collectionsTopbarActions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.publicProfileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 18px;
+}
+
+.publicProfileIdentity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.publicProfileAvatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.publicProfileAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.publicProfileAvatarText {
+  font-size: 18px;
+  font-weight: 900;
+  color: rgba(248, 250, 252, 0.92);
+}
+
+.publicProfileCopy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.publicProfileNameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.publicProfileName {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: rgba(248, 250, 252, 0.95);
+  min-width: 0;
+}
+
+.publicProfileHandle {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(148, 163, 184, 0.92);
+}
+
+.publicProfileBio {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.78);
+  max-width: 720px;
+}
+
+.publicProfileBio.muted {
+  color: rgba(148, 163, 184, 0.75);
+}
+
+.publicProfileError {
+  margin-top: 2px;
+  color: rgba(248, 113, 113, 0.95);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.publicProfileActions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.publicProfileSection {
+  margin-top: 18px;
+}
+
+.publicProfileSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.publicListTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.publicListTitleRow .tripName {
+  flex: 1;
+  min-width: 0;
+}
+
+.publicListSubtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.72);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.publicListCard {
+  cursor: default;
+}
+
+.publicListCard:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+@keyframes stashShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.publicProfileAvatarSkeleton {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.publicProfileSkeletonCopy {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  max-width: 520px;
+}
+
+.publicProfileSkeletonLine {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+  width: 200px;
+  max-width: 100%;
+}
+
+.publicProfileSkeletonLine.wide {
+  width: 280px;
+}
+
+.publicListSkeleton {
+  border-radius: 16px;
+  min-height: 238px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.publicProfileAvatarSkeleton::after,
+.publicProfileSkeletonLine::after,
+.publicListSkeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.09) 45%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: stashShimmer 1.1s ease-in-out infinite;
+}
+
+@media (max-width: 768px) {
+  .publicProfileHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .publicProfileActions {
+    justify-content: stretch;
+  }
+
+  .publicProfileActions .miniBtn {
+    width: 100%;
+  }
+}
+
 .reviewGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);

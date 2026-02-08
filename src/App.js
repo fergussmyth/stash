@@ -9,6 +9,7 @@ import { TripsProvider } from "./hooks/useTrips";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
+import PublicProfile from "./pages/PublicProfile";
 import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
 import stashLogo from "./assets/icons/stash-favicon.png";
@@ -32,13 +33,15 @@ function AppShell() {
     location.pathname.startsWith("/trips/") ||
     location.pathname === "/review" ||
     location.pathname === "/profile" ||
+    location.pathname.startsWith("/@") ||
     location.pathname === "/" ||
     location.pathname === "/login";
 
   const publicOnly =
     location.pathname === "/" ||
     location.pathname === "/login" ||
-    location.pathname.startsWith("/share/");
+    location.pathname.startsWith("/share/") ||
+    location.pathname.startsWith("/@");
 
   const showAuthGate = !loading && !user && !publicOnly;
 
@@ -229,6 +232,7 @@ function AppShell() {
         <Route path="/trips/:id" element={<TripDetail />} />
         <Route path="/review" element={<Review />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/@:handle" element={<PublicProfile />} />
         <Route path="/settings/extension" element={<ExtensionSettings />} />
         <Route path="/share/:shareId" element={<ShareTrip />} />
       </Routes>
