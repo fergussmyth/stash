@@ -34,7 +34,15 @@ const STOP_WORDS = new Set([
   "collections",
   "list",
   "lists",
+  "general",
+  "idea",
+  "ideas",
 ]);
+
+const CATEGORY_HINTS: Record<string, string[]> = {
+  travel: ["travel", "destination"],
+  fashion: ["fashion", "style"],
+};
 
 const COLOR_PALETTE = [
   "#0f172a",
@@ -57,6 +65,7 @@ const IMAGE_MIN_BYTES = 25_000;
 const COVER_PRIORITY: Record<string, number> = {
   gradient: 1,
   unsplash: 2,
+  wikipedia: 2,
   og: 3,
   manual: 100,
 };
@@ -94,18 +103,49 @@ function toAbsoluteUrl(value: string, base: string): string {
 function normalizeQueryText(input: string): string[] {
   const cleaned = (input || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\\s]/g, " ")
-    .replace(/\\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return [];
   return cleaned
     .split(" ")
     .map((word) => word.trim())
-    .filter((word) => word && !STOP_WORDS.has(word));
+    .filter((word) => {
+      if (!word) return false;
+      if (STOP_WORDS.has(word)) return false;
+      if (/^\d+$/.test(word)) return false;
+      if (word.length <= 1) return false;
+      return true;
+    });
 }
 
 function expandKeywords(tokens: string[]): string[] {
-  const expanded = new Set(tokens);
+  const expanded = new Set<string>();
+  for (const token of tokens) {
+    expanded.add(token);
+    if (token === "newjeans") expanded.add("jeans");
+    if (
+      token.endsWith("s") &&
+      token.length > 4 &&
+      !token.endsWith("ss") &&
+      !token.endsWith("is")
+    ) {
+      expanded.add(token.slice(0, -1));
+    }
+  }
+
+  if (expanded.has("japan")) {
+    expanded.add("japanese");
+    expanded.add("tokyo");
+    expanded.add("kyoto");
+  }
+  if (expanded.has("japanese")) {
+    expanded.add("japan");
+  }
+  if (expanded.has("newjeans")) {
+    expanded.add("denim");
+    expanded.add("style");
+  }
   if (expanded.has("jeans")) expanded.add("denim");
   if (expanded.has("paris")) {
     expanded.add("city");
@@ -185,15 +225,20 @@ export async function extractOgImage(pageUrl: string): Promise<string | null> {
 }
 
 export function buildCoverQuery(name: string, type: string): string {
-  const tokens = normalizeQueryText(`${name} ${type}`);
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const typeHints = CATEGORY_HINTS[normalizedType] || [];
+  const tokens = normalizeQueryText([name, ...typeHints].join(" "));
   const expanded = expandKeywords(tokens);
   if (!expanded.length) return "abstract texture";
-  return expanded.slice(0, 6).join(" ");
+  return expanded.slice(0, 7).join(" ");
 }
 
 export async function getUnsplashCover(query: string): Promise<string | null> {
   const accessKey = Deno.env.get("UNSPLASH_ACCESS_KEY") || "";
-  if (!accessKey) return null;
+  if (!accessKey) {
+    console.warn("collection-cover: UNSPLASH_ACCESS_KEY missing; skipping Unsplash lookup");
+    return null;
+  }
   const url =
     "https://api.unsplash.com/search/photos" +
     `?query=${encodeURIComponent(query)}` +
@@ -204,12 +249,52 @@ export async function getUnsplashCover(query: string): Promise<string | null> {
       { method: "GET", headers: { Authorization: `Client-ID ${accessKey}` } },
       6000
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(
+        `collection-cover: Unsplash lookup failed with status ${response.status} for query "${query}"`
+      );
+      return null;
+    }
     const data = await response.json();
     const result = data?.results?.[0];
     const imageUrl = result?.urls?.regular || result?.urls?.full || "";
     return imageUrl || null;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `collection-cover: Unsplash lookup threw for query "${query}": ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return null;
+  }
+}
+
+export async function getWikipediaCover(query: string): Promise<string | null> {
+  const trimmed = String(query || "").trim();
+  if (!trimmed) return null;
+  const url =
+    "https://en.wikipedia.org/w/api.php" +
+    "?action=query&format=json&formatversion=2&generator=search&gsrlimit=6" +
+    "&prop=pageimages&piprop=thumbnail&pithumbsize=1280" +
+    `&gsrsearch=${encodeURIComponent(trimmed)}`;
+  try {
+    const response = await fetchWithTimeout(url, { method: "GET" }, 6000);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const pages = Array.isArray(data?.query?.pages) ? data.query.pages : [];
+    for (const page of pages) {
+      const imageUrl = String(page?.thumbnail?.source || "").trim();
+      if (/^https?:\/\//i.test(imageUrl)) {
+        return imageUrl;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.warn(
+      `collection-cover: Wikipedia lookup threw for query "${query}": ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return null;
   }
 }
@@ -256,6 +341,11 @@ export async function pickCoverForCollection({
   const unsplashUrl = await getUnsplashCover(query);
   if (unsplashUrl) {
     return { coverImageUrl: unsplashUrl, coverImageSource: "unsplash" };
+  }
+
+  const wikipediaUrl = await getWikipediaCover(query);
+  if (wikipediaUrl) {
+    return { coverImageUrl: wikipediaUrl, coverImageSource: "wikipedia" };
   }
 
   return { coverImageUrl: makeGradientCover(seed), coverImageSource: "gradient" };

@@ -5,7 +5,7 @@ import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
 import stashLogo from "../assets/icons/stash-favicon.png";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
@@ -104,17 +104,15 @@ function IconTrash(props) {
   );
 }
 
-function formatLastUpdated(trip) {
-  const itemTimes = (trip.items || [])
-    .map((item) => item.addedAt || 0)
-    .filter(Boolean);
-  const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
+const LAST_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+});
+
+function formatLastUpdatedFromMs(latest) {
   if (!latest) return "recently";
-  return new Date(latest).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return LAST_UPDATED_FORMATTER.format(latest);
 }
 
 export default function Trips() {
@@ -180,6 +178,22 @@ export default function Trips() {
     },
     [trips]
   );
+  const lastUpdatedByTripId = useMemo(() => {
+    const map = new Map();
+    for (const trip of trips) {
+      let latest = Date.parse(trip.createdAt || "") || 0;
+      for (const item of trip.items || []) {
+        const addedAt = Number(item?.addedAt || 0);
+        if (addedAt > latest) latest = addedAt;
+      }
+      map.set(trip.id, latest);
+    }
+    return map;
+  }, [trips]);
+  const formatLastUpdated = useCallback(
+    (trip) => formatLastUpdatedFromMs(lastUpdatedByTripId.get(trip.id) || 0),
+    [lastUpdatedByTripId]
+  );
   const sortedTrips = useMemo(
     () =>
       filteredTrips.slice().sort((a, b) => {
@@ -192,11 +206,11 @@ export default function Trips() {
         if (sortMode === "count") {
           return (b.items?.length || 0) - (a.items?.length || 0);
         }
-        const aTime = getLastUpdatedTime(a);
-        const bTime = getLastUpdatedTime(b);
+        const aTime = lastUpdatedByTripId.get(a.id) || 0;
+        const bTime = lastUpdatedByTripId.get(b.id) || 0;
         return bTime - aTime;
       }),
-    [filteredTrips, sortMode]
+    [filteredTrips, sortMode, lastUpdatedByTripId]
   );
   const publishTrip = useMemo(
     () => trips.find((trip) => trip.id === publishTripId) || null,
@@ -331,12 +345,6 @@ export default function Trips() {
   function togglePin(trip) {
     toggleTripPinned(trip.id, !trip.pinned);
     setMenuOpenId("");
-  }
-
-  function getLastUpdatedTime(trip) {
-    const itemTimes = (trip.items || []).map((item) => item.addedAt || 0).filter(Boolean);
-    const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
-    return latest || 0;
   }
 
   async function handleRenameTrip(trip) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTrips } from "../hooks/useTrips";
@@ -28,6 +28,7 @@ const FILTERS = [
 
 const TRENDING_LIMIT = 12;
 const NEW_LIMIT = 24;
+const CREATOR_VISIBLE_STEP = 8;
 
 const COMPACT_NUMBER = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -190,9 +191,12 @@ export default function Explore() {
   const { trips, createTrip, deleteTrip, reloadTripItems } = useTrips();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [followingPanelOpen, setFollowingPanelOpen] = useState(false);
   const [sectionFilter, setSectionFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [searchValue, setSearchValue] = useState("");
+  const [creatorSearchInput, setCreatorSearchInput] = useState("");
+  const [creatorVisibleCount, setCreatorVisibleCount] = useState(CREATOR_VISIBLE_STEP);
   const [toastMsg, setToastMsg] = useState("");
 
   const [trendingLists, setTrendingLists] = useState([]);
@@ -206,6 +210,7 @@ export default function Explore() {
 
   const requestIdRef = useRef(0);
   const trendingScrollerRef = useRef(null);
+  const creatorSearchInputRef = useRef(null);
 
   const [creators, setCreators] = useState([]);
   const [loadingCreators, setLoadingCreators] = useState(true);
@@ -225,7 +230,22 @@ export default function Explore() {
     [trips]
   );
 
-  const creatorsToRender = useMemo(() => creators.slice(0, 6), [creators]);
+  const creatorSearchValue = useMemo(() => creatorSearchInput.trim().toLowerCase(), [creatorSearchInput]);
+
+  const filteredCreators = useMemo(() => {
+    if (!creatorSearchValue) return creators;
+    return creators.filter((creator) => {
+      const displayName = String(creator?.displayName || "").toLowerCase();
+      const handle = normalizeHandle(creator?.handle || "");
+      return displayName.includes(creatorSearchValue) || handle.includes(creatorSearchValue);
+    });
+  }, [creators, creatorSearchValue]);
+
+  const creatorsToRender = useMemo(
+    () => filteredCreators.slice(0, creatorVisibleCount),
+    [filteredCreators, creatorVisibleCount]
+  );
+  const hasMoreCreators = creatorsToRender.length < filteredCreators.length;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -233,6 +253,28 @@ export default function Explore() {
     }, 220);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    setCreatorVisibleCount(CREATOR_VISIBLE_STEP);
+  }, [creatorSearchValue]);
+
+  useEffect(() => {
+    if (!followingPanelOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setFollowingPanelOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    const frame = window.requestAnimationFrame(() => {
+      creatorSearchInputRef.current?.focus();
+    });
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [followingPanelOpen]);
 
   function setToast(message) {
     setToastMsg(message);
@@ -277,24 +319,30 @@ export default function Explore() {
     ])
       .then(([trendingResult, newestResult]) => {
         if (!active || requestIdRef.current !== requestId) return;
-        setTrendingLists(trendingResult.lists || []);
-        setNewLists(newestResult.lists || []);
-        setHasMoreNew(!!newestResult.hasMore);
-        if (newestResult.error || trendingResult.error) {
-          setLoadError("Could not load explore collections right now.");
-        }
+        startTransition(() => {
+          setTrendingLists(trendingResult.lists || []);
+          setNewLists(newestResult.lists || []);
+          setHasMoreNew(!!newestResult.hasMore);
+          if (newestResult.error || trendingResult.error) {
+            setLoadError("Could not load explore collections right now.");
+          }
+        });
       })
       .catch(() => {
         if (!active || requestIdRef.current !== requestId) return;
-        setTrendingLists([]);
-        setNewLists([]);
-        setHasMoreNew(false);
-        setLoadError("Could not load explore collections right now.");
+        startTransition(() => {
+          setTrendingLists([]);
+          setNewLists([]);
+          setHasMoreNew(false);
+          setLoadError("Could not load explore collections right now.");
+        });
       })
       .finally(() => {
         if (!active || requestIdRef.current !== requestId) return;
-        setLoadingTrending(false);
-        setLoadingNew(false);
+        startTransition(() => {
+          setLoadingTrending(false);
+          setLoadingNew(false);
+        });
       });
 
     return () => {
@@ -322,18 +370,20 @@ export default function Explore() {
 
     getSavedListsByIds({ viewerUserId, listIds: ids }).then(({ map }) => {
       if (!active) return;
-      setSaveStateByListId((prev) => {
-        const next = { ...prev };
-        for (const id of ids) {
-          const current = next[id] || {};
-          if (current.saving) continue;
-          next[id] = {
-            saved: map.has(id),
-            savedTripId: map.get(id)?.savedTripId || "",
-            saving: false,
-          };
-        }
-        return next;
+      startTransition(() => {
+        setSaveStateByListId((prev) => {
+          const next = { ...prev };
+          for (const id of ids) {
+            const current = next[id] || {};
+            if (current.saving) continue;
+            next[id] = {
+              saved: map.has(id),
+              savedTripId: map.get(id)?.savedTripId || "",
+              saving: false,
+            };
+          }
+          return next;
+        });
       });
     });
 
@@ -458,8 +508,10 @@ export default function Explore() {
         setLoadingMoreNew(false);
         return;
       }
-      setNewLists((prev) => mergeUniqueLists(prev, result.lists || []));
-      setHasMoreNew(!!result.hasMore);
+      startTransition(() => {
+        setNewLists((prev) => mergeUniqueLists(prev, result.lists || []));
+        setHasMoreNew(!!result.hasMore);
+      });
     } catch {
       setLoadError("Could not load more right now.");
     } finally {
@@ -479,20 +531,28 @@ export default function Explore() {
       .then(({ creators: rows, error }) => {
         if (!active) return;
         if (error) {
-          setCreators([]);
-          setCreatorLoadError("Could not load creators right now.");
+          startTransition(() => {
+            setCreators([]);
+            setCreatorLoadError("Could not load creators right now.");
+          });
           return;
         }
-        setCreators(rows || []);
+        startTransition(() => {
+          setCreators(rows || []);
+        });
       })
       .catch(() => {
         if (!active) return;
-        setCreators([]);
-        setCreatorLoadError("Could not load creators right now.");
+        startTransition(() => {
+          setCreators([]);
+          setCreatorLoadError("Could not load creators right now.");
+        });
       })
       .finally(() => {
         if (!active) return;
-        setLoadingCreators(false);
+        startTransition(() => {
+          setLoadingCreators(false);
+        });
       });
 
     return () => {
@@ -526,12 +586,14 @@ export default function Explore() {
       .in("following_user_id", creatorIds)
       .then(({ data, error }) => {
         if (!active) return;
-        if (error) {
-          setFollowedCreatorIds([]);
-        } else {
-          setFollowedCreatorIds((data || []).map((row) => row.following_user_id).filter(Boolean));
-        }
-        setLoadingCreatorFollows(false);
+        startTransition(() => {
+          if (error) {
+            setFollowedCreatorIds([]);
+          } else {
+            setFollowedCreatorIds((data || []).map((row) => row.following_user_id).filter(Boolean));
+          }
+          setLoadingCreatorFollows(false);
+        });
       });
 
     return () => {
@@ -608,29 +670,41 @@ export default function Explore() {
             onSearchChange={setSearchInput}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
             actions={
-              user ? (
-                <>
-                  <button className="topbarIconBtn" type="button" aria-label="Notifications">
-                    <svg className="topbarBellIcon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                        d="M18 9a6 6 0 10-12 0v4l-2 3h16l-2-3zM10 19a2 2 0 004 0"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
+              <>
+                <button
+                  className="topbarPill subtle exploreFollowingToggle"
+                  type="button"
+                  onClick={() => setFollowingPanelOpen(true)}
+                  aria-haspopup="dialog"
+                  aria-controls="explore-following-drawer"
+                  aria-expanded={followingPanelOpen}
+                >
+                  Following
+                </button>
+                {user ? (
+                  <>
+                    <button className="topbarIconBtn exploreTopbarIconOnly" type="button" aria-label="Notifications">
+                      <svg className="topbarBellIcon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M18 9a6 6 0 10-12 0v4l-2 3h16l-2-3zM10 19a2 2 0 004 0"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <Link className="topbarIconBtn exploreTopbarIconOnly" to="/profile" aria-label="Profile">
+                      <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
+                    </Link>
+                  </>
+                ) : (
+                  <Link className="topbarPill subtle" to="/login">
+                    Sign in
                   </Link>
-                </>
-              ) : (
-                <Link className="topbarPill subtle" to="/login">
-                  Sign in
-                </Link>
-              )
+                )}
+              </>
             }
           />
         }
@@ -734,66 +808,130 @@ export default function Explore() {
                     </>
                   )}
                 </section>
-
-                <aside className="exploreSidebar" aria-label="Creators to follow">
-                  <div className="exploreSidebarCard">
-                    <div className="exploreSidebarHead">
-                      <div className="listTitle">Creators to follow</div>
-                    </div>
-
-                    {loadingCreators ? (
-                      <div className="exploreSidebarLoading" aria-hidden="true">
-                        <div className="exploreSidebarLoadingRow" />
-                        <div className="exploreSidebarLoadingRow" />
-                        <div className="exploreSidebarLoadingRow" />
-                      </div>
-                    ) : creatorsToRender.length === 0 ? (
-                      <div className="exploreSidebarEmpty">No creators yet</div>
-                    ) : (
-                      <div className="exploreCreatorList">
-                        {creatorsToRender.map((creator) => {
-                          const isFollowing = followedCreatorIds.includes(creator.id);
-                          const followWorking = !!followWorkingByCreatorId[creator.id];
-                          const followError = followErrorByCreatorId[creator.id] || "";
-                          const displayName = creator.displayName || creator.handle || "Stash user";
-                          return (
-                            <div key={`creator-${creator.id}`} className="exploreCreatorBlock">
-                              <div className="exploreCreatorRow">
-                                <Link className="exploreCreatorIdentity" to={`/@${creator.handle}`}>
-                                  <span className="exploreCreatorAvatar" aria-hidden="true">
-                                    {creator.avatarUrl ? (
-                                      <img src={creator.avatarUrl} alt="" />
-                                    ) : (
-                                      <span>{displayName.charAt(0).toUpperCase()}</span>
-                                    )}
-                                  </span>
-                                  <span className="exploreCreatorCopy">
-                                    <span className="exploreCreatorName">{displayName}</span>
-                                  </span>
-                                </Link>
-                                <button
-                                  className={`miniBtn exploreFollowBtn ${isFollowing ? "isFollowing" : ""}`}
-                                  type="button"
-                                  onClick={() => handleToggleFollowCreator(creator)}
-                                  disabled={followWorking || loadingCreatorFollows}
-                                >
-                                  {followWorking ? "..." : isFollowing ? "Following" : "Follow"}
-                                </button>
-                              </div>
-                              {followError ? <div className="exploreCreatorError">{followError}</div> : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {creatorLoadError ? <div className="exploreSidebarError">{creatorLoadError}</div> : null}
-                  </div>
-                </aside>
               </div>
             </main>
           </div>
         </section>
+
+        <div
+          className={`exploreFollowingOverlay ${followingPanelOpen ? "isOpen" : ""}`}
+          role="presentation"
+          onClick={() => setFollowingPanelOpen(false)}
+        />
+
+        <aside
+          id="explore-following-drawer"
+          className={`exploreFollowingDrawer ${followingPanelOpen ? "isOpen" : ""}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Following creators"
+          aria-hidden={!followingPanelOpen}
+        >
+          <div className="exploreFollowingHead">
+            <div className="listTitle">Following</div>
+            <button
+              className="exploreFollowingClose"
+              type="button"
+              onClick={() => setFollowingPanelOpen(false)}
+              aria-label="Close following panel"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+
+          <div className="exploreFollowingSearchRow">
+            <label className="visuallyHidden" htmlFor="explore-creator-search">
+              Search creators
+            </label>
+            <span className="exploreFollowingSearchIcon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="presentation">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M20 20l-3.1-3.1" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </span>
+            <input
+              id="explore-creator-search"
+              ref={creatorSearchInputRef}
+              className="exploreFollowingSearchInput"
+              type="search"
+              placeholder="Search creators"
+              value={creatorSearchInput}
+              onChange={(event) => setCreatorSearchInput(event.target.value)}
+            />
+          </div>
+
+          <div className="exploreFollowingBody">
+            {loadingCreators ? (
+              <div className="exploreSidebarLoading" aria-hidden="true">
+                <div className="exploreSidebarLoadingRow" />
+                <div className="exploreSidebarLoadingRow" />
+                <div className="exploreSidebarLoadingRow" />
+              </div>
+            ) : creators.length === 0 ? (
+              <div className="exploreSidebarEmpty">No creators yet</div>
+            ) : creatorsToRender.length === 0 ? (
+              <div className="exploreSidebarEmpty">No creators match your search.</div>
+            ) : (
+              <div className="exploreCreatorList">
+                {creatorsToRender.map((creator) => {
+                  const isFollowing = followedCreatorIds.includes(creator.id);
+                  const followWorking = !!followWorkingByCreatorId[creator.id];
+                  const followError = followErrorByCreatorId[creator.id] || "";
+                  const displayName = creator.displayName || creator.handle || "Stash user";
+                  const creatorHandle = normalizeHandle(creator.handle || "");
+                  const creatorRouteKey = creatorHandle || String(creator.id || "").trim();
+                  const creatorHref = creatorRouteKey ? `/@${creatorRouteKey}` : "/explore";
+                  return (
+                    <div key={`creator-${creator.id}`} className="exploreCreatorBlock">
+                      <div className="exploreCreatorRow">
+                        <Link
+                          className="exploreCreatorIdentity"
+                          to={creatorHref}
+                          onClick={() => setFollowingPanelOpen(false)}
+                        >
+                          <span className="exploreCreatorAvatar" aria-hidden="true">
+                            {creator.avatarUrl ? (
+                              <img src={creator.avatarUrl} alt="" />
+                            ) : (
+                              <span>{displayName.charAt(0).toUpperCase()}</span>
+                            )}
+                          </span>
+                          <span className="exploreCreatorCopy">
+                            <span className="exploreCreatorName">{displayName}</span>
+                            {creatorHandle ? <span className="exploreCreatorHandle">@{creatorHandle}</span> : null}
+                          </span>
+                        </Link>
+                        <button
+                          className={`miniBtn exploreFollowBtn ${isFollowing ? "isFollowing" : ""}`}
+                          type="button"
+                          onClick={() => handleToggleFollowCreator(creator)}
+                          disabled={followWorking || loadingCreatorFollows}
+                        >
+                          {followWorking ? "..." : isFollowing ? "Following" : "Follow"}
+                        </button>
+                      </div>
+                      {followError ? <div className="exploreCreatorError">{followError}</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {creatorLoadError ? <div className="exploreSidebarError">{creatorLoadError}</div> : null}
+          </div>
+
+          {hasMoreCreators ? (
+            <div className="exploreFollowingFooter">
+              <button
+                className="miniBtn"
+                type="button"
+                onClick={() => setCreatorVisibleCount((prev) => prev + CREATOR_VISIBLE_STEP)}
+              >
+                View all
+              </button>
+            </div>
+          ) : null}
+        </aside>
       </AppShell>
     </div>
   );

@@ -124,6 +124,27 @@ function getPlatform(domain) {
   return "";
 }
 
+function isAirbnbItem(item) {
+  const domain = String(item?.domain || "").toLowerCase();
+  const url = String(item?.url || item?.originalUrl || item?.airbnbUrl || "").toLowerCase();
+  return domain.includes("airbnb.") || url.includes("airbnb.");
+}
+
+function recentTitleForItem(item) {
+  const rawTitle = String(item?.title || "").trim();
+  if (!rawTitle) return item?.domain || "Stashed link";
+
+  let title = rawTitle.replace(/\s*[-|]\s*airbnb\s*$/i, "").trim();
+
+  // Airbnb pages often append metadata like rating/bedrooms using separators.
+  if (isAirbnbItem(item)) {
+    title = title.split(/\s[·•]\s/)[0].trim();
+    title = title.split(/\s\|\s/)[0].trim();
+  }
+
+  return title || item?.domain || "Stashed link";
+}
+
 function decodeHtmlEntities(text = "") {
   if (!text) return "";
   if (typeof document === "undefined") return text;
@@ -1301,15 +1322,16 @@ export default function Home() {
             ) : null}
 
             <div className="homeRecent">
-              <div className="homeRecentLabel">
-                Recently stashed ({recentItems.length})
+              <div className="homeRecentHead">
+                <div className="homeRecentLabel">Recently stashed ({recentItems.length})</div>
+                {recentItems.length > 1 ? <div className="homeRecentHint">Swipe</div> : null}
               </div>
-              <div className="homeRecentList">
-                {recentItems.length === 0 ? (
-                  <div className="homeRecentEmpty">No recent items yet.</div>
-                ) : (
-                  recentItems.map((item) => (
-                    <div key={item.id} className="homeRecentItem">
+              {recentItems.length === 0 ? (
+                <div className="homeRecentEmpty">No recent items yet.</div>
+              ) : (
+                <div className="homeRecentCarousel" role="list" aria-label="Recently stashed links">
+                  {recentItems.map((item) => (
+                    <div key={item.id} className="homeRecentItem" role="listitem">
                       <div className="homeRecentIcon">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path
@@ -1330,7 +1352,7 @@ export default function Home() {
                       </div>
                       <div className="homeRecentMeta">
                         <div className="homeRecentTitle">
-                          {item.title || item.domain || "Stashed link"}
+                          {recentTitleForItem(item)}
                         </div>
                         <div className="homeRecentSub">
                           {item.url || item.originalUrl || item.domain || "—"}
@@ -1392,9 +1414,9 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         </div>

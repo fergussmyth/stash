@@ -14,11 +14,10 @@ function normalizeHandle(value = "") {
 function mapCreatorRow(row = {}) {
   const id = String(row.id || "");
   const normalizedHandle = normalizeHandle(row.handle || "");
-  const fallbackHandle = normalizedHandle || `user-${id.slice(0, 8) || "stash"}`;
-  const displayName = String(row.display_name || "").trim() || fallbackHandle;
+  const displayName = String(row.display_name || "").trim() || normalizedHandle || "Stash user";
   return {
     id,
-    handle: fallbackHandle,
+    handle: normalizedHandle,
     displayName,
     avatarUrl: String(row.avatar_url || "").trim(),
     createdAt: row.created_at || null,

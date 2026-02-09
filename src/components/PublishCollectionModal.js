@@ -125,6 +125,13 @@ export default function PublishCollectionModal({
 
   const [dragItemId, setDragItemId] = useState("");
   const [dragOverItemId, setDragOverItemId] = useState("");
+  const [touchLiftItemId, setTouchLiftItemId] = useState("");
+  const [touchGhostPoint, setTouchGhostPoint] = useState({ x: 0, y: 0 });
+  const [touchGhostMetrics, setTouchGhostMetrics] = useState({
+    offsetX: 24,
+    offsetY: 28,
+    width: 0,
+  });
 
   const [editingItemId, setEditingItemId] = useState("");
   const [editingItemTitle, setEditingItemTitle] = useState("");
@@ -143,6 +150,13 @@ export default function PublishCollectionModal({
   const initialItemContentRef = useRef(new Map());
   const coverUrlInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
+  const rankListRef = useRef(null);
+  const dragItemIdRef = useRef("");
+  const touchLongPressTimerRef = useRef(null);
+  const touchStartPointRef = useRef({ x: 0, y: 0 });
+  const touchStartGhostMetaRef = useRef({ offsetX: 24, offsetY: 28, width: 0 });
+  const touchDragActiveRef = useRef(false);
+  const touchDragOverRef = useRef("");
   const [isMobilePublishView, setIsMobilePublishView] = useState(false);
 
   useEffect(() => {
@@ -248,6 +262,14 @@ export default function PublishCollectionModal({
     return () => media.removeListener(sync);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (touchLongPressTimerRef.current) {
+        clearTimeout(touchLongPressTimerRef.current);
+      }
+    };
+  }, []);
+
   const coverSeed = useMemo(() => `${trip?.id || ""}-${title || trip?.name || ""}`, [trip?.id, title, trip?.name]);
   const fallbackGradient = useMemo(() => makeCoverGradient(coverSeed), [coverSeed]);
   const effectiveCover = String(coverImageUrl || trip?.coverImageUrl || "").trim();
@@ -280,6 +302,7 @@ export default function PublishCollectionModal({
 
   function handleDragStart(event, itemId) {
     setDragItemId(itemId);
+    dragItemIdRef.current = itemId;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", itemId);
   }
@@ -294,10 +317,146 @@ export default function PublishCollectionModal({
 
   function handleDrop(event, itemId) {
     event.preventDefault();
-    const sourceId = dragItemId || event.dataTransfer.getData("text/plain");
+    const sourceId = dragItemIdRef.current || dragItemId || event.dataTransfer.getData("text/plain");
     reorderItems(sourceId, itemId);
     setDragItemId("");
     setDragOverItemId("");
+    dragItemIdRef.current = "";
+  }
+
+  function clearTouchDrag() {
+    touchDragActiveRef.current = false;
+    touchDragOverRef.current = "";
+    dragItemIdRef.current = "";
+    if (touchLongPressTimerRef.current) {
+      clearTimeout(touchLongPressTimerRef.current);
+      touchLongPressTimerRef.current = null;
+    }
+    setDragItemId("");
+    setDragOverItemId("");
+    setTouchLiftItemId("");
+    setTouchGhostMetrics({ offsetX: 24, offsetY: 28, width: 0 });
+  }
+
+  function findRankItemAtPoint(clientX, clientY) {
+    if (typeof document === "undefined") return "";
+    const target = document.elementFromPoint(clientX, clientY);
+    const row = target?.closest?.("[data-rank-item-id]");
+    if (!row) return "";
+    return String(row.getAttribute("data-rank-item-id") || "");
+  }
+
+  function handleTouchDragStart(itemId, point = null, ghostMeta = null) {
+    if (saving || savingHandle || uploadingCover) return;
+    touchDragActiveRef.current = true;
+    touchDragOverRef.current = "";
+    dragItemIdRef.current = itemId;
+    setDragItemId(itemId);
+    setDragOverItemId("");
+    setTouchLiftItemId(itemId);
+    if (point) {
+      setTouchGhostPoint({ x: point.x, y: point.y });
+    }
+    if (ghostMeta) {
+      setTouchGhostMetrics({
+        offsetX: ghostMeta.offsetX || 24,
+        offsetY: ghostMeta.offsetY || 28,
+        width: ghostMeta.width || 0,
+      });
+    }
+  }
+
+  function handleTouchDragMove(event) {
+    const activeItemId = dragItemIdRef.current || dragItemId;
+    if (!touchDragActiveRef.current || !activeItemId) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    event.preventDefault();
+    setTouchGhostPoint({ x: touch.clientX, y: touch.clientY });
+
+    const overId = findRankItemAtPoint(touch.clientX, touch.clientY);
+    if (!overId || overId === activeItemId) {
+      touchDragOverRef.current = "";
+      setDragOverItemId("");
+      return;
+    }
+    if (overId !== touchDragOverRef.current) {
+      reorderItems(activeItemId, overId);
+      touchDragOverRef.current = overId;
+      setDragOverItemId(overId);
+    }
+  }
+
+  function handleTouchDragEnd(event) {
+    if (!touchDragActiveRef.current) return;
+    // Rows have already been reordered during hover.
+    // Drop now just finalizes drag state and removes ghost/lift styling.
+    clearTouchDrag();
+  }
+
+  function beginLongPressTouchDrag(event, itemId) {
+    if (!isMobilePublishView || saving || savingHandle || uploadingCover) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    const interactiveTarget = event.target?.closest?.(
+      ".publishRowEditBtn, .publishItemEditor input, .publishItemEditor textarea, .publishItemEditor button"
+    );
+    if (interactiveTarget) return;
+
+    touchStartPointRef.current = { x: touch.clientX, y: touch.clientY };
+    const rowRect = event.currentTarget?.getBoundingClientRect?.();
+    touchStartGhostMetaRef.current = {
+      offsetX: rowRect ? Math.max(0, touch.clientX - rowRect.left) : 24,
+      offsetY: rowRect ? Math.max(0, touch.clientY - rowRect.top) : 28,
+      width: rowRect ? Math.max(0, rowRect.width) : 0,
+    };
+    if (touchLongPressTimerRef.current) clearTimeout(touchLongPressTimerRef.current);
+    touchLongPressTimerRef.current = setTimeout(() => {
+      handleTouchDragStart(itemId, touchStartPointRef.current, touchStartGhostMetaRef.current);
+      touchLongPressTimerRef.current = null;
+    }, 220);
+  }
+
+  function maybeCancelLongPressFromMove(event) {
+    if (!touchLongPressTimerRef.current || touchDragActiveRef.current) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    const dx = Math.abs(touch.clientX - touchStartPointRef.current.x);
+    const dy = Math.abs(touch.clientY - touchStartPointRef.current.y);
+    if (dx > 8 || dy > 8) {
+      clearTimeout(touchLongPressTimerRef.current);
+      touchLongPressTimerRef.current = null;
+    }
+  }
+
+  function handleRankRowTouchMove(event) {
+    if (touchDragActiveRef.current) {
+      handleTouchDragMove(event);
+      return;
+    }
+    maybeCancelLongPressFromMove(event);
+  }
+
+  function handleRankRowTouchEnd(event) {
+    if (touchLongPressTimerRef.current) {
+      clearTimeout(touchLongPressTimerRef.current);
+      touchLongPressTimerRef.current = null;
+    }
+    if (touchDragActiveRef.current) {
+      handleTouchDragEnd(event);
+    }
+  }
+
+  function handleRankRowTouchCancel(event) {
+    if (touchLongPressTimerRef.current) {
+      clearTimeout(touchLongPressTimerRef.current);
+      touchLongPressTimerRef.current = null;
+    }
+    if (touchDragActiveRef.current) {
+      handleTouchDragEnd(event);
+      return;
+    }
+    clearTouchDrag();
   }
 
   function beginEditItem(item) {
@@ -584,12 +743,16 @@ export default function PublishCollectionModal({
 
       <div className="fieldGroup">
         <div className="fieldLabel publishRankLabel">Rank Links</div>
-        <div className="fieldHelp">Drag to reorder links before publishing</div>
+        <div className="fieldHelp">
+          {isMobilePublishView
+            ? "Hold any row to lift it, then drag and drop to reorder"
+            : "Drag to reorder links before publishing"}
+        </div>
 
         {rankItems.length === 0 ? (
           <div className="publishRankEmpty">No links in this collection yet.</div>
         ) : (
-          <div className="publishRankList" role="list" aria-label="Rank links before publish">
+          <div ref={rankListRef} className="publishRankList" role="list" aria-label="Rank links before publish">
             {rankItems.map((item) => {
               const domainText = item.domain || domainFromUrl(item.url);
               const isEditing = editingItemId === item.id;
@@ -598,9 +761,22 @@ export default function PublishCollectionModal({
                   key={item.id}
                   className={`publishRankRow ${dragItemId === item.id ? "isDragSource" : ""} ${
                     dragOverItemId === item.id && dragItemId !== item.id ? "isDragOver" : ""
+                  } ${isEditing ? "isEditing" : ""} ${
+                    touchLiftItemId === item.id ? "isTouchLifted" : ""
                   }`}
+                  data-rank-item-id={item.id}
                   onDragOver={(event) => handleDragOver(event, item.id)}
+                  onDragEnter={(event) => handleDragOver(event, item.id)}
                   onDrop={(event) => handleDrop(event, item.id)}
+                  onContextMenu={(event) => {
+                    if (isMobilePublishView && !isEditing) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onTouchStart={(event) => beginLongPressTouchDrag(event, item.id)}
+                  onTouchMove={handleRankRowTouchMove}
+                  onTouchEnd={handleRankRowTouchEnd}
+                  onTouchCancel={handleRankRowTouchCancel}
                 >
                   <button
                     className="iconBtn bare quickActionBtn publishDragBtn"
@@ -610,26 +786,17 @@ export default function PublishCollectionModal({
                     onDragEnd={() => {
                       setDragItemId("");
                       setDragOverItemId("");
+                      dragItemIdRef.current = "";
                     }}
                     aria-label="Drag to reorder"
-                    title="Drag to reorder"
+                    title={isMobilePublishView ? "Hold and drag to reorder" : "Drag to reorder"}
                   >
                     <IconDragDots className="quickActionIcon" />
                   </button>
 
                   <div className="publishRankMain">
-                    <div className="publishRankTitleRow">
-                      <div className="publishRankTitle" title={item.title}>
-                        {item.title}
-                      </div>
-                      <button
-                        className="miniBtn publishRowEditBtn"
-                        type="button"
-                        onClick={() => beginEditItem(item)}
-                        disabled={saving || savingHandle}
-                      >
-                        Edit
-                      </button>
+                    <div className="publishRankTitle" title={item.title}>
+                      {item.title}
                     </div>
                     <div className="publishRankMeta">{item.note || domainText || item.url || "Saved link"}</div>
 
@@ -658,6 +825,17 @@ export default function PublishCollectionModal({
                       </div>
                     ) : null}
                   </div>
+
+                  {!isEditing ? (
+                    <button
+                      className="miniBtn publishRowEditBtn"
+                      type="button"
+                      onClick={() => beginEditItem(item)}
+                      disabled={saving || savingHandle}
+                    >
+                      Edit
+                    </button>
+                  ) : null}
                 </div>
               );
             })}
@@ -725,21 +903,46 @@ export default function PublishCollectionModal({
     </div>
   );
 
+  const touchGhostItem = touchLiftItemId
+    ? rankItems.find((item) => item.id === touchLiftItemId) || null
+    : null;
+
   if (isMobilePublishView) {
     return (
       <div className="publishMobileOverlay" role="dialog" aria-modal="true" onClick={onClose}>
-        <div className="publishMobileModal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className={`publishMobileModal ${touchGhostItem ? "isDragLocked" : ""}`}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="publishMobileHeader">
             <div className="publishMobileTitle">Publish Collection</div>
             <button className="shareModalClose" type="button" aria-label="Close" onClick={onClose}>
               ×
             </button>
           </div>
-          <div className="publishMobileBody">
+          <div className={`publishMobileBody ${touchGhostItem ? "isDragLocked" : ""}`}>
             {publishFormBody}
             {handleClaimBody}
             {warningBody}
           </div>
+          {touchGhostItem ? (
+            <div
+              className="publishTouchGhost"
+              style={{
+                "--touch-x": `${touchGhostPoint.x}px`,
+                "--touch-y": `${touchGhostPoint.y}px`,
+                "--touch-offset-x": `${touchGhostMetrics.offsetX}px`,
+                "--touch-offset-y": `${touchGhostMetrics.offsetY}px`,
+                "--touch-width": touchGhostMetrics.width ? `${touchGhostMetrics.width}px` : "",
+              }}
+              aria-hidden="true"
+            >
+              <div className="publishTouchGhostTitle">{touchGhostItem.title}</div>
+              <div className="publishTouchGhostMeta">
+                {touchGhostItem.note || touchGhostItem.domain || touchGhostItem.url || "Saved link"}
+              </div>
+            </div>
+          ) : null}
           <div className="publishMobileFooter">{actionRow}</div>
         </div>
       </div>

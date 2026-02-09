@@ -192,17 +192,13 @@ export default function CollectionCard({
                   </span>
                 )}
               </div>
+              <div className="collectionCardOverlayMeta">
+                {linkCount} link{linkCount === 1 ? "" : "s"} · last updated {formatLastUpdated(trip)}
+              </div>
             </div>
           </>
         ) : null}
       </div>
-      {!isEditing ? (
-        <div className="collectionCardFooter">
-          <div className="tripMetaLine">
-            {linkCount} link{linkCount === 1 ? "" : "s"} · updated {formatLastUpdated(trip)}
-          </div>
-        </div>
-      ) : null}
       {isEditing ? (
         <div className="collectionCardEditPanel">
           <div className="tripRenameRow">

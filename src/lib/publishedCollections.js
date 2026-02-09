@@ -86,15 +86,33 @@ export function mapCollectionItemRow(row = {}) {
 }
 
 export async function getProfileByHandle(handleInput = "") {
-  const handle = normalizeHandle(handleInput || "");
+  const raw = String(handleInput || "")
+    .trim()
+    .replace(/^@+/, "");
+  const handle = normalizeHandle(raw);
   if (!handle) return { profile: null, error: null };
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id,handle,display_name,bio,avatar_url,is_public,created_at,updated_at")
     .eq("handle", handle)
     .maybeSingle();
   if (error) return { profile: null, error };
-  return { profile: data || null, error: null };
+  if (data) return { profile: data, error: null };
+
+  // Fallback for routes like /@<user-id> when a creator has no claimed handle yet.
+  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    raw
+  );
+  if (!looksLikeUuid) return { profile: null, error: null };
+
+  const { data: byIdData, error: byIdError } = await supabase
+    .from("profiles")
+    .select("id,handle,display_name,bio,avatar_url,is_public,created_at,updated_at")
+    .eq("id", raw.toLowerCase())
+    .maybeSingle();
+  if (byIdError) return { profile: null, error: byIdError };
+  return { profile: byIdData || null, error: null };
 }
 
 export async function getViewerProfile(viewerUserId = "") {
