@@ -8,6 +8,7 @@ import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import PublicListCard from "../components/PublicListCard";
 import { hydrateListPreviewImages } from "../lib/socialDiscovery";
+import { getPublicCollectionsByHandle } from "../lib/publishedCollections";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -91,41 +92,29 @@ export default function PublicProfile() {
         return;
       }
 
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("id,handle,display_name,bio,avatar_url,is_public,created_at,updated_at")
-        .eq("handle", handle)
-        .single();
+      const collectionsResult = await getPublicCollectionsByHandle({
+        handleInput: handle,
+        viewerUserId,
+        limit: 80,
+      });
 
       if (!active) return;
-
-      if (profileError || !profileData) {
+      if (collectionsResult.status === "not_found" || !collectionsResult.profile) {
         setNotFound(true);
         setLoadingProfile(false);
         setLoadingLists(false);
         return;
       }
 
+      const profileData = collectionsResult.profile;
       setProfile(profileData);
       setLoadingProfile(false);
 
-      const { data: listsData, error: listsError } = await supabase
-        .from("lists")
-        .select(
-          "id,owner_user_id,section,title,subtitle,slug,cover_image_url,visibility,is_ranked,ranked_size,pinned_order,save_count,view_count,created_at,updated_at"
-        )
-        .eq("owner_user_id", profileData.id)
-        .eq("visibility", "public")
-        .order("created_at", { ascending: false })
-        .limit(60);
-
-      if (!active) return;
-
-      if (listsError) {
-        setLoadError("Could not load public lists right now.");
+      if (collectionsResult.status === "error") {
+        setLoadError("Could not load public collections right now.");
         setLists([]);
       } else {
-        const hydratedLists = await hydrateListPreviewImages(listsData || []);
+        const hydratedLists = await hydrateListPreviewImages(collectionsResult.collections || []);
         if (!active) return;
         setLists(hydratedLists);
       }

@@ -11,6 +11,13 @@ function makeFallbackGradient(seed) {
   return `linear-gradient(135deg, ${pick(0)} 0%, ${pick(2)} 50%, ${pick(4)} 100%)`;
 }
 
+function sectionLabel(section = "") {
+  const normalized = String(section || "").toLowerCase();
+  if (normalized === "travel") return "Travel";
+  if (normalized === "fashion") return "Fashion";
+  return "Ideas";
+}
+
 export default function CollectionCard({
   trip,
   coverImageUrl,
@@ -23,16 +30,22 @@ export default function CollectionCard({
   menuOpen,
   onToggleMenu,
   onShare,
+  onChangeSection,
   onTogglePin,
   onDelete,
+  onPublish,
   onOpen,
   onStartRename,
   formatLastUpdated,
-  IconExternal,
   IconEdit,
-  IconTrash,
   pinIcon,
 }) {
+  const section = String(trip.type || "general").toLowerCase();
+  const sectionOptions = [
+    { value: "general", label: "Ideas" },
+    { value: "travel", label: "Travel" },
+    { value: "fashion", label: "Fashion" },
+  ];
   const [coverLoaded, setCoverLoaded] = useState(false);
   const linkCount = trip.items?.length || 0;
   const coverSeed = useMemo(() => `${trip.id || ""}-${trip.name || ""}`, [trip.id, trip.name]);
@@ -52,11 +65,12 @@ export default function CollectionCard({
       : trip.decisionStatus === "decided"
       ? "Decided"
       : "";
+
   return (
     <div
       className={`collectionCard ${trip.pinned ? "pinned" : ""} ${
         menuOpen ? "menuOpen" : ""
-      }`}
+      } ${isEditing ? "isEditing" : ""}`}
       role="button"
       tabIndex={0}
       onClick={() => {
@@ -85,9 +99,112 @@ export default function CollectionCard({
             onError={() => setCoverLoaded(true)}
           />
         )}
+        <div className="collectionCardShade" />
+        {!isEditing ? (
+          <>
+            <div className="collectionCardTopRow">
+              {trip.pinned ? (
+                <button
+                  className="tripPinBtn"
+                  type="button"
+                  aria-label="Unpin collection"
+                  title="Unpin collection"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onTogglePin();
+                  }}
+                >
+                  <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
+                </button>
+              ) : (
+                <span className="collectionCardTopSpacer" aria-hidden="true" />
+              )}
+              <div className="collectionCardTopActions">
+                <button
+                  className="iconBtn bare collectionCardEditBtn"
+                  type="button"
+                  aria-label="Edit collection"
+                  title="Edit"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartRename();
+                  }}
+                >
+                  <IconEdit className="quickActionIcon" />
+                </button>
+                <div className="tripMenuWrap" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    className="tripMenuBtn"
+                    type="button"
+                    aria-label="Collection options"
+                    onClick={onToggleMenu}
+                  >
+                    ⋮
+                  </button>
+                  {menuOpen && (
+                    <div className="tripMenu" role="menu">
+                      <button className="tripMenuItem" type="button" onClick={onStartRename}>
+                        Edit
+                      </button>
+                      <button className="tripMenuItem" type="button" onClick={onShare}>
+                        Share
+                      </button>
+                      {typeof onChangeSection === "function" ? (
+                        <>
+                          <div className="tripMenuSectionLabel">Move to section</div>
+                          {sectionOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              className={`tripMenuItem ${section === option.value ? "active" : ""}`}
+                              type="button"
+                              disabled={section === option.value}
+                              onClick={() => onChangeSection(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </>
+                      ) : null}
+                      {typeof onPublish === "function" ? (
+                        <button className="tripMenuItem" type="button" onClick={onPublish}>
+                          Publish
+                        </button>
+                      ) : null}
+                      <button className="tripMenuItem danger" type="button" onClick={onDelete}>
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="collectionCardOverlay">
+              <div className="tripNameRow">
+                <div className="tripName">{trip.name}</div>
+                <span className="tripCategory">{sectionLabel(trip.type)}</span>
+                {decisionBadge && (
+                  <span
+                    className={`decisionBadge ${
+                      trip.decisionStatus === "decided" ? "decided" : "progress"
+                    }`}
+                  >
+                    {decisionBadge}
+                  </span>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
       </div>
-      <div className="collectionCardBody">
-        {isEditing ? (
+      {!isEditing ? (
+        <div className="collectionCardFooter">
+          <div className="tripMetaLine">
+            {linkCount} link{linkCount === 1 ? "" : "s"} · updated {formatLastUpdated(trip)}
+          </div>
+        </div>
+      ) : null}
+      {isEditing ? (
+        <div className="collectionCardEditPanel">
           <div className="tripRenameRow">
             <input
               className="input tripRenameInput"
@@ -141,84 +258,8 @@ export default function CollectionCard({
               </button>
             </div>
           </div>
-        ) : (
-          <div className="tripHeaderTop">
-            <div className="tripHeaderMain">
-              <div className="tripNameRow">
-                <div className="tripName">{trip.name}</div>
-                {decisionBadge && (
-                  <span
-                    className={`decisionBadge ${
-                      trip.decisionStatus === "decided" ? "decided" : "progress"
-                    }`}
-                  >
-                    {decisionBadge}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="tripHeaderActions">
-              <div className="tripQuickActions" role="group" aria-label="Quick actions">
-                <button
-                  className="iconBtn bare quickActionBtn"
-                  type="button"
-                  aria-label="Edit collection"
-                  title="Edit"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartRename();
-                  }}
-                >
-                  <IconEdit className="quickActionIcon" />
-                </button>
-              </div>
-              <div className="tripMenuWrap" onClick={(event) => event.stopPropagation()}>
-                <button
-                  className="tripMenuBtn"
-                  type="button"
-                  aria-label="Collection options"
-                  onClick={onToggleMenu}
-                >
-                  ⋮
-                </button>
-                {menuOpen && (
-                  <div className="tripMenu" role="menu">
-                    <button className="tripMenuItem" type="button" onClick={onStartRename}>
-                      Edit
-                    </button>
-                    <button className="tripMenuItem" type="button" onClick={onShare}>
-                      Share
-                    </button>
-                    <button className="tripMenuItem danger" type="button" onClick={onDelete}>
-                      Delete
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="tripMetaLine">
-          {linkCount} link{linkCount === 1 ? "" : "s"} · updated {formatLastUpdated(trip)}
         </div>
-
-        {trip.pinned && (
-          <button
-            className="tripPinBtn"
-            type="button"
-            aria-label="Unpin collection"
-            title="Unpin collection"
-            onClick={(event) => {
-              event.stopPropagation();
-              onTogglePin();
-            }}
-          >
-            <img className="tripPinIcon" src={pinIcon} alt="" aria-hidden="true" />
-          </button>
-        )}
-
-      </div>
+      ) : null}
     </div>
   );
 }

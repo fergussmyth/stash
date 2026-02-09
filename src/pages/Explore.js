@@ -5,11 +5,19 @@ import { useTrips } from "../hooks/useTrips";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
-import PublicListCard from "../components/PublicListCard";
-import { fetchTrendingLists } from "../lib/socialDiscovery";
-import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
+import TrendingListCard from "../components/TrendingListCard";
+import { fetchNewestPublicLists, fetchTrendingLists } from "../lib/socialDiscovery";
+import { fetchCreators } from "../lib/socialCreators";
+import {
+  getSavedListsByIds,
+  savePublicListToStash,
+  unsavePublicListFromStash,
+} from "../lib/socialSave";
+import { supabase } from "../lib/supabaseClient";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
+import saveIcon from "../assets/icons/save-.png";
+import saveFilledIcon from "../assets/icons/save-filled.png";
 
 const FILTERS = [
   { value: "all", label: "All" },
@@ -17,6 +25,165 @@ const FILTERS = [
   { value: "fashion", label: "Fashion" },
   { value: "general", label: "General" },
 ];
+
+const TRENDING_LIMIT = 12;
+const NEW_LIMIT = 24;
+
+const COMPACT_NUMBER = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+function mergeUniqueLists(prevRows = [], nextRows = []) {
+  const seen = new Set(prevRows.map((row) => row.id));
+  const merged = [...prevRows];
+  for (const row of nextRows) {
+    if (!row?.id || seen.has(row.id)) continue;
+    seen.add(row.id);
+    merged.push(row);
+  }
+  return merged;
+}
+
+function normalizeHandle(value = "") {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
+function makeFallbackGradient(seed = "") {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const colors = ["#0b1020", "#10162b", "#172448", "#102f46", "#1a1f35", "#2b1f3f"];
+  const pick = (offset) => colors[Math.abs(hash + offset) % colors.length];
+  return `linear-gradient(135deg, ${pick(0)} 0%, ${pick(2)} 52%, ${pick(4)} 100%)`;
+}
+
+function isGradientCover(value = "") {
+  const normalized = String(value || "").trim();
+  return normalized.startsWith("linear-gradient") || normalized.startsWith("radial-gradient");
+}
+
+function formatSavedCount(value) {
+  const count = Number(value || 0);
+  if (!Number.isFinite(count) || count <= 0) return "0 saves";
+  if (count < 1000) return `${count.toLocaleString()} saves`;
+  return `${COMPACT_NUMBER.format(count).toLowerCase()} saves`;
+}
+
+function getTrendingBadge(list = {}) {
+  if (list?.is_ranked && Number(list?.ranked_size) === 10) return "Top 10";
+  if (list?.is_ranked) return "Top 5";
+  return "";
+}
+
+function ExploreFeedCard({
+  list,
+  isSaved = false,
+  isSaving = false,
+  onSave = null,
+}) {
+  const ownerHandle = normalizeHandle(list?.owner_handle || "stash");
+  const ownerDisplayName = String(list?.owner_display_name || ownerHandle || "Stash user").trim() || "Stash user";
+  const ownerAvatarUrl = String(list?.owner_avatar_url || "").trim();
+  const destination = ownerHandle && list?.slug ? `/@${ownerHandle}/${list.slug}` : "";
+  const title = String(list?.title || list?.name || "Untitled collection").trim() || "Untitled collection";
+  const subtitle = String(list?.subtitle || "").trim();
+  const canSave = typeof onSave === "function";
+
+  const rawCover = String(list?.cover_image_url || list?.preview_image_url || "").trim();
+  const gradientCover = isGradientCover(rawCover);
+  const imageCover = !!rawCover && !gradientCover && !rawCover.startsWith("data:");
+  const fallbackGradient = makeFallbackGradient(`${list?.id || ""}-${title}`);
+  const mediaBackground = gradientCover ? rawCover || fallbackGradient : fallbackGradient;
+
+  const badgeLabel = getTrendingBadge(list);
+  const content = (
+    <>
+      <span
+        className={`exploreFeedCardMedia ${imageCover ? "hasImage" : ""}`}
+        style={{ backgroundImage: mediaBackground }}
+        aria-hidden="true"
+      >
+        {imageCover ? <img src={rawCover} alt="" loading="lazy" /> : null}
+        <span className="exploreFeedCardShade" />
+      </span>
+
+      {badgeLabel ? <span className="exploreFeedCardBadge">{badgeLabel}</span> : null}
+
+      <span className="exploreFeedCardBody">
+        <span className="exploreFeedCardCreator">
+          <span className="exploreFeedCardAvatar" aria-hidden="true">
+            {ownerAvatarUrl ? <img src={ownerAvatarUrl} alt="" /> : <span>{ownerDisplayName.charAt(0).toUpperCase()}</span>}
+          </span>
+          <span className="exploreFeedCardCreatorMeta">
+            <span className="exploreFeedCardCreatorName">{ownerDisplayName}</span>
+          </span>
+        </span>
+
+        <span className="exploreFeedCardTitle" title={title}>
+          {title}
+        </span>
+
+        {subtitle ? <span className="exploreFeedCardSubtitle">{subtitle}</span> : null}
+
+        <span className="exploreFeedCardMetaRow">
+          <span className="exploreFeedCardSavedPill">Saved</span>
+          <span>{formatSavedCount(list?.save_count)}</span>
+        </span>
+      </span>
+    </>
+  );
+
+  const saveControl = canSave ? (
+    <button
+      className={`exploreFeedSaveBtn ${isSaved ? "isSaved" : ""}`}
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onSave();
+      }}
+      disabled={isSaving}
+      aria-label={isSaved ? "Unsave collection" : "Save collection"}
+    >
+      <img src={isSaved ? saveFilledIcon : saveIcon} alt="" aria-hidden="true" />
+    </button>
+  ) : null;
+
+  if (destination && canSave) {
+    return (
+      <article className="exploreFeedCard" aria-label={title}>
+        <Link className="exploreFeedCardLink" to={destination} state={{ fromExplore: true }}>
+          {content}
+        </Link>
+        {saveControl}
+      </article>
+    );
+  }
+
+  if (destination) {
+    return (
+      <article className="exploreFeedCard" aria-label={title}>
+        <Link className="exploreFeedCardLink" to={destination} state={{ fromExplore: true }}>
+          {content}
+        </Link>
+        {saveControl}
+      </article>
+    );
+  }
+
+  return (
+    <article className="exploreFeedCard" aria-label={title}>
+      <div className="exploreFeedCardLink">{content}</div>
+      {saveControl}
+    </article>
+  );
+}
 
 export default function Explore() {
   const { user } = useAuth();
@@ -27,14 +194,27 @@ export default function Explore() {
   const [searchInput, setSearchInput] = useState("");
   const [searchValue, setSearchValue] = useState("");
   const [toastMsg, setToastMsg] = useState("");
-  const [lists, setLists] = useState([]);
-  const [saveStateByListId, setSaveStateByListId] = useState({});
-  const [loadingLists, setLoadingLists] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+
+  const [trendingLists, setTrendingLists] = useState([]);
+  const [newLists, setNewLists] = useState([]);
+
+  const [loadingTrending, setLoadingTrending] = useState(true);
+  const [loadingNew, setLoadingNew] = useState(true);
+  const [loadingMoreNew, setLoadingMoreNew] = useState(false);
+  const [hasMoreNew, setHasMoreNew] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [dataSource, setDataSource] = useState("");
+
   const requestIdRef = useRef(0);
+  const trendingScrollerRef = useRef(null);
+
+  const [creators, setCreators] = useState([]);
+  const [loadingCreators, setLoadingCreators] = useState(true);
+  const [creatorLoadError, setCreatorLoadError] = useState("");
+  const [followedCreatorIds, setFollowedCreatorIds] = useState([]);
+  const [loadingCreatorFollows, setLoadingCreatorFollows] = useState(false);
+  const [followWorkingByCreatorId, setFollowWorkingByCreatorId] = useState({});
+  const [followErrorByCreatorId, setFollowErrorByCreatorId] = useState({});
+  const [saveStateByListId, setSaveStateByListId] = useState({});
 
   const categoryCounts = useMemo(
     () =>
@@ -44,6 +224,8 @@ export default function Explore() {
       }, {}),
     [trips]
   );
+
+  const creatorsToRender = useMemo(() => creators.slice(0, 6), [creators]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -57,34 +239,62 @@ export default function Explore() {
     setTimeout(() => setToastMsg(""), 1700);
   }
 
+  function updateListSaveCount(listId, delta) {
+    const apply = (rows = []) =>
+      rows.map((row) =>
+        row.id === listId
+          ? {
+              ...row,
+              save_count: Math.max(Number(row.save_count || 0) + delta, 0),
+            }
+          : row
+      );
+    setTrendingLists((prev) => apply(prev));
+    setNewLists((prev) => apply(prev));
+  }
+
   useEffect(() => {
     let active = true;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    setLoadingLists(true);
+    setLoadingTrending(true);
+    setLoadingNew(true);
     setLoadError("");
 
-    fetchTrendingLists({
-      section: sectionFilter,
-      search: searchValue,
-      limit: 24,
-      offset: 0,
-    })
-      .then((result) => {
+    Promise.all([
+      fetchTrendingLists({
+        section: sectionFilter,
+        search: searchValue,
+        limit: TRENDING_LIMIT,
+        offset: 0,
+      }),
+      fetchNewestPublicLists({
+        section: sectionFilter,
+        search: searchValue,
+        limit: NEW_LIMIT,
+        offset: 0,
+      }),
+    ])
+      .then(([trendingResult, newestResult]) => {
         if (!active || requestIdRef.current !== requestId) return;
-        setLists(result.lists || []);
-        setHasMore(!!result.hasMore);
-        setDataSource(result.source || "");
+        setTrendingLists(trendingResult.lists || []);
+        setNewLists(newestResult.lists || []);
+        setHasMoreNew(!!newestResult.hasMore);
+        if (newestResult.error || trendingResult.error) {
+          setLoadError("Could not load explore collections right now.");
+        }
       })
       .catch(() => {
         if (!active || requestIdRef.current !== requestId) return;
-        setLists([]);
-        setHasMore(false);
-        setLoadError("Could not load explore lists right now.");
+        setTrendingLists([]);
+        setNewLists([]);
+        setHasMoreNew(false);
+        setLoadError("Could not load explore collections right now.");
       })
       .finally(() => {
         if (!active || requestIdRef.current !== requestId) return;
-        setLoadingLists(false);
+        setLoadingTrending(false);
+        setLoadingNew(false);
       });
 
     return () => {
@@ -92,45 +302,19 @@ export default function Explore() {
     };
   }, [sectionFilter, searchValue]);
 
-  async function loadMore() {
-    if (loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    const offset = lists.length;
-    try {
-      const result = await fetchTrendingLists({
-        section: sectionFilter,
-        search: searchValue,
-        limit: 24,
-        offset,
-      });
-      const incoming = result.lists || [];
-      setLists((prev) => {
-        const seen = new Set(prev.map((row) => row.id));
-        const merged = [...prev];
-        for (const row of incoming) {
-          if (!row?.id || seen.has(row.id)) continue;
-          seen.add(row.id);
-          merged.push(row);
-        }
-        return merged;
-      });
-      setHasMore(!!result.hasMore);
-      setDataSource(result.source || dataSource);
-    } catch {
-      setLoadError("Could not load more lists.");
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
   useEffect(() => {
     let active = true;
     const viewerUserId = user?.id || "";
-    const ids = [...new Set((lists || []).map((row) => row.id).filter(Boolean))];
+    const ids = [
+      ...new Set(
+        [...trendingLists, ...newLists]
+          .map((row) => row?.id)
+          .filter(Boolean)
+      ),
+    ];
+
     if (!viewerUserId || !ids.length) {
-      if (!viewerUserId) {
-        setSaveStateByListId({});
-      }
+      if (!viewerUserId) setSaveStateByListId({});
       return () => {
         active = false;
       };
@@ -141,13 +325,11 @@ export default function Explore() {
       setSaveStateByListId((prev) => {
         const next = { ...prev };
         for (const id of ids) {
-          const existing = next[id] || {};
-          if (existing.saving) continue;
-          const saved = map.has(id);
-          const savedTripId = map.get(id)?.savedTripId || "";
+          const current = next[id] || {};
+          if (current.saving) continue;
           next[id] = {
-            saved,
-            savedTripId,
+            saved: map.has(id),
+            savedTripId: map.get(id)?.savedTripId || "",
             saving: false,
           };
         }
@@ -158,103 +340,60 @@ export default function Explore() {
     return () => {
       active = false;
     };
-  }, [user?.id, lists]);
+  }, [user?.id, trendingLists, newLists]);
 
-  async function viewSavedList(list) {
-    const listId = list?.id || "";
+  async function handleToggleSaveList(list) {
+    const listId = String(list?.id || "");
     if (!listId) return;
-    const savedTripId = saveStateByListId[listId]?.savedTripId || "";
-    if (savedTripId) {
-      navigate(`/trips/${savedTripId}`);
-      return;
-    }
     if (!user?.id) {
       navigate("/login");
       return;
     }
-    if (saveStateByListId[listId]?.saving) return;
+
+    const current = saveStateByListId[listId] || {};
+    if (current.saving) return;
 
     setSaveStateByListId((prev) => ({
       ...prev,
       [listId]: {
-        saved: true,
-        savedTripId: "",
         ...(prev[listId] || {}),
         saving: true,
       },
     }));
 
-    const result = await savePublicListToStash({
-      viewerUserId: user.id,
-      list,
-      ownerHandle: list.owner_handle || "",
-      createTrip,
-      deleteTrip,
-      reloadTripItems,
-    });
+    if (current.saved) {
+      const result = await unsavePublicListFromStash({
+        viewerUserId: user.id,
+        listId,
+        deleteTrip,
+      });
 
-    if (result.status === "saved" || result.status === "already_saved") {
-      const nextTripId = result.savedTripId || "";
+      if (result.status === "unsaved" || result.status === "not_saved") {
+        setSaveStateByListId((prev) => ({
+          ...prev,
+          [listId]: {
+            saved: false,
+            savedTripId: "",
+            saving: false,
+          },
+        }));
+        if (result.status === "unsaved") {
+          updateListSaveCount(listId, -1);
+        }
+        setToast("Removed from your Stash");
+        return;
+      }
+
       setSaveStateByListId((prev) => ({
         ...prev,
         [listId]: {
-          saved: true,
-          savedTripId: nextTripId,
+          ...(prev[listId] || {}),
           saving: false,
         },
       }));
-      if (result.status === "saved" && result.insertedSaveRow) {
-        setLists((prev) =>
-          prev.map((row) =>
-            row.id === listId
-              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
-              : row
-          )
-        );
-      }
-      if (nextTripId) {
-        navigate(`/trips/${nextTripId}`);
-        return;
-      }
-      navigate("/trips");
+      setToast(result.message || "Couldn’t remove save right now.");
       return;
     }
-
-    setSaveStateByListId((prev) => ({
-      ...prev,
-      [listId]: {
-        ...(prev[listId] || {}),
-        saving: false,
-      },
-    }));
-    setToast(result.message || "Couldn’t open saved copy.");
-    navigate("/trips");
-  }
-
-  async function handleSaveList(list) {
-    if (!list?.id) return;
-    const listId = list.id;
-    if (!user?.id) {
-      navigate("/login");
-      return;
-    }
-
-    const state = saveStateByListId[listId] || {};
-    if (state.saving) return;
-    if (state.saved) {
-      await viewSavedList(list);
-      return;
-    }
-
-    setSaveStateByListId((prev) => ({
-      ...prev,
-      [listId]: {
-        saved: false,
-        savedTripId: "",
-        ...(prev[listId] || {}),
-        saving: true,
-      },
-    }));
 
     const result = await savePublicListToStash({
       viewerUserId: user.id,
@@ -275,13 +414,7 @@ export default function Explore() {
         },
       }));
       if (result.insertedSaveRow) {
-        setLists((prev) =>
-          prev.map((row) =>
-            row.id === listId
-              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
-              : row
-          )
-        );
+        updateListSaveCount(listId, 1);
       }
       setToast("Saved to your Stash");
       return;
@@ -303,8 +436,6 @@ export default function Explore() {
     setSaveStateByListId((prev) => ({
       ...prev,
       [listId]: {
-        saved: false,
-        savedTripId: "",
         ...(prev[listId] || {}),
         saving: false,
       },
@@ -312,13 +443,150 @@ export default function Explore() {
     setToast(result.message || "Couldn’t save right now.");
   }
 
-  const subtitle = searchValue
-    ? `Results for "${searchValue}"`
-    : "Trending public lists across Stash.";
-  const sectionLabel = FILTERS.find((item) => item.value === sectionFilter)?.label || "All";
+  async function loadMoreNew() {
+    if (loadingMoreNew || !hasMoreNew) return;
+    setLoadingMoreNew(true);
+    try {
+      const result = await fetchNewestPublicLists({
+        section: sectionFilter,
+        search: searchValue,
+        limit: NEW_LIMIT,
+        offset: newLists.length,
+      });
+      if (result.error) {
+        setLoadError("Could not load more right now.");
+        setLoadingMoreNew(false);
+        return;
+      }
+      setNewLists((prev) => mergeUniqueLists(prev, result.lists || []));
+      setHasMoreNew(!!result.hasMore);
+    } catch {
+      setLoadError("Could not load more right now.");
+    } finally {
+      setLoadingMoreNew(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    setLoadingCreators(true);
+    setCreatorLoadError("");
+
+    fetchCreators({
+      limit: 18,
+      excludeUserId: user?.id || "",
+    })
+      .then(({ creators: rows, error }) => {
+        if (!active) return;
+        if (error) {
+          setCreators([]);
+          setCreatorLoadError("Could not load creators right now.");
+          return;
+        }
+        setCreators(rows || []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCreators([]);
+        setCreatorLoadError("Could not load creators right now.");
+      })
+      .finally(() => {
+        if (!active) return;
+        setLoadingCreators(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const scroller = trendingScrollerRef.current;
+    if (!scroller) return;
+    scroller.scrollTo({ left: 0, behavior: "auto" });
+  }, [sectionFilter, searchValue]);
+
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const creatorIds = creators.map((creator) => creator.id).filter(Boolean);
+    if (!viewerUserId || !creatorIds.length) {
+      setFollowedCreatorIds([]);
+      setLoadingCreatorFollows(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoadingCreatorFollows(true);
+    supabase
+      .from("follows")
+      .select("following_user_id")
+      .eq("follower_user_id", viewerUserId)
+      .in("following_user_id", creatorIds)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setFollowedCreatorIds([]);
+        } else {
+          setFollowedCreatorIds((data || []).map((row) => row.following_user_id).filter(Boolean));
+        }
+        setLoadingCreatorFollows(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [creators, user?.id]);
+
+  async function handleToggleFollowCreator(creator) {
+    const creatorId = String(creator?.id || "");
+    if (!creatorId) return;
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+    if (creatorId === user.id) return;
+    if (followWorkingByCreatorId[creatorId]) return;
+
+    const isFollowing = followedCreatorIds.includes(creatorId);
+    setFollowErrorByCreatorId((prev) => ({ ...prev, [creatorId]: "" }));
+    setFollowWorkingByCreatorId((prev) => ({ ...prev, [creatorId]: true }));
+
+    if (isFollowing) {
+      const { error } = await supabase
+        .from("follows")
+        .delete()
+        .eq("follower_user_id", user.id)
+        .eq("following_user_id", creatorId);
+      if (error) {
+        setFollowErrorByCreatorId((prev) => ({ ...prev, [creatorId]: "Could not unfollow right now." }));
+      } else {
+        setFollowedCreatorIds((prev) => prev.filter((id) => id !== creatorId));
+        setToast("Unfollowed");
+      }
+      setFollowWorkingByCreatorId((prev) => ({ ...prev, [creatorId]: false }));
+      return;
+    }
+
+    const { error } = await supabase.from("follows").insert({
+      following_user_id: creatorId,
+    });
+    if (error) {
+      setFollowErrorByCreatorId((prev) => ({ ...prev, [creatorId]: "Could not follow right now." }));
+    } else {
+      setFollowedCreatorIds((prev) => (prev.includes(creatorId) ? prev : [...prev, creatorId]));
+      setToast("Following");
+    }
+    setFollowWorkingByCreatorId((prev) => ({ ...prev, [creatorId]: false }));
+  }
 
   return (
-    <div className="page explorePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+    <div
+      className={`page explorePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))] ${
+        user ? "isSignedIn" : "isSignedOut"
+      }`}
+    >
       <AppShell
         sidebar={
           <SidebarNav
@@ -335,15 +603,29 @@ export default function Explore() {
         topbar={
           <TopBar
             title="Explore"
-            subtitle={subtitle}
+            subtitle="Discover lists curated by others"
             searchValue={searchInput}
             onSearchChange={setSearchInput}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
             actions={
               user ? (
-                <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                  <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
-                </Link>
+                <>
+                  <button className="topbarIconBtn" type="button" aria-label="Notifications">
+                    <svg className="topbarBellIcon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M18 9a6 6 0 10-12 0v4l-2 3h16l-2-3zM10 19a2 2 0 004 0"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
+                  </Link>
+                </>
               ) : (
                 <Link className="topbarPill subtle" to="/login">
                   Sign in
@@ -355,73 +637,161 @@ export default function Explore() {
         isSidebarOpen={sidebarOpen}
         onCloseSidebar={() => setSidebarOpen(false)}
       >
-        {toastMsg && <div className="toast">{toastMsg}</div>}
-        <section className="panel p-5 collectionsPanel listPanel fullWidth">
-          <div className="panelContent">
-            <div className="exploreFilters" role="tablist" aria-label="Explore filters">
-              {FILTERS.map((filter) => (
-                <button
-                  key={filter.value}
-                  className={`miniBtn ${sectionFilter === filter.value ? "blue" : ""}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={sectionFilter === filter.value}
-                  onClick={() => setSectionFilter(filter.value)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
+        {toastMsg ? <div className="toast">{toastMsg}</div> : null}
 
-            <div className="exploreMeta">
-              <div className="listTitle">{sectionLabel} lists</div>
-              {dataSource === "fallback" ? (
-                <div className="fieldHelp">Showing newest-ranked fallback while trend data warms up.</div>
-              ) : null}
-            </div>
-
-            {loadError && <div className="warning">{loadError}</div>}
-
-            {loadingLists ? (
-              <div className="collectionsGrid">
-                {Array.from({ length: 8 }).map((_, index) => (
-                  <div key={index} className="publicListSkeleton" />
+        <section className="exploreFeedPanel">
+          <div className="exploreLayout">
+            <main className="exploreMain">
+              <div className="exploreFilters" role="tablist" aria-label="Explore filters">
+                {FILTERS.map((filter) => (
+                  <button
+                    key={filter.value}
+                    className={`miniBtn exploreFilterPill ${sectionFilter === filter.value ? "isActive" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={sectionFilter === filter.value}
+                    onClick={() => setSectionFilter(filter.value)}
+                  >
+                    {filter.label}
+                  </button>
                 ))}
               </div>
-            ) : lists.length === 0 ? (
-              <div className="collectionsEmpty">
-                <div className="collectionsEmptyIcon" aria-hidden="true">
-                  ✦
+
+              {loadError ? <div className="warning">{loadError}</div> : null}
+
+              <section className="exploreSectionBlock">
+                <div className="exploreSectionHead">
+                  <div className="listTitle">Trending</div>
                 </div>
-                <div className="collectionsEmptyTitle">No lists found</div>
-                <div className="collectionsEmptyText">
-                  Try another search or filter.
+
+                <div className="trendingWrap">
+                  {loadingTrending ? (
+                    <div ref={trendingScrollerRef} className="trendingRow skeletonRow" aria-hidden="true">
+                      {Array.from({ length: 5 }).map((_, index) => (
+                        <div key={`trend-skeleton-${index}`} className="trendingListSkeleton" />
+                      ))}
+                    </div>
+                  ) : trendingLists.length === 0 ? (
+                    <div className="collectionsEmpty compact">
+                      <div className="collectionsEmptyTitle">No trending collections yet</div>
+                      <div className="collectionsEmptyText">Try another section or search term.</div>
+                    </div>
+                  ) : (
+                    <div ref={trendingScrollerRef} className="trendingRow" role="list" aria-label="Trending collections">
+                      {trendingLists.map((list) => (
+                        <TrendingListCard
+                          key={`trending-${list.id}`}
+                          list={list}
+                          handle={list.owner_handle}
+                          isSaved={!!saveStateByListId[list.id]?.saved}
+                          isSaving={!!saveStateByListId[list.id]?.saving}
+                          onSave={() => handleToggleSaveList(list)}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
-              <>
-                <div className="collectionsGrid">
-                  {lists.map((list) => (
-                    <PublicListCard
-                      key={list.id}
-                      list={list}
-                      handle={list.owner_handle}
-                      isSaved={!!saveStateByListId[list.id]?.saved}
-                      isSaving={!!saveStateByListId[list.id]?.saving}
-                      onSave={() => handleSaveList(list)}
-                      onViewSaved={() => viewSavedList(list)}
-                    />
-                  ))}
-                </div>
-                {hasMore ? (
-                  <div className="exploreLoadMoreRow">
-                    <button className="miniBtn blue" type="button" onClick={loadMore} disabled={loadingMore}>
-                      {loadingMore ? "Loading…" : "Load more"}
-                    </button>
+              </section>
+
+              <div className="exploreLowerLayout">
+                <section className="exploreNewColumn">
+                  <div className="exploreSectionHead newSection">
+                    <div className="listTitle">New this week</div>
                   </div>
-                ) : null}
-              </>
-            )}
+
+                  {loadingNew ? (
+                    <div className="exploreDiscoveryGrid" aria-hidden="true">
+                      {Array.from({ length: 4 }).map((_, index) => (
+                        <div key={`new-skeleton-${index}`} className="exploreFeedCardSkeleton" />
+                      ))}
+                    </div>
+                  ) : newLists.length === 0 ? (
+                    <div className="collectionsEmpty compact">
+                      <div className="collectionsEmptyTitle">No new collections found</div>
+                      <div className="collectionsEmptyText">Try a different filter or clear search.</div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="exploreDiscoveryGrid">
+                        {newLists.map((list) => (
+                          <ExploreFeedCard
+                            key={`new-${list.id}`}
+                            list={list}
+                            isSaved={!!saveStateByListId[list.id]?.saved}
+                            isSaving={!!saveStateByListId[list.id]?.saving}
+                            onSave={() => handleToggleSaveList(list)}
+                          />
+                        ))}
+                      </div>
+
+                      {hasMoreNew ? (
+                        <div className="exploreLoadMoreRow">
+                          <button className="miniBtn blue" type="button" onClick={loadMoreNew} disabled={loadingMoreNew}>
+                            {loadingMoreNew ? "Loading..." : "Load more"}
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </section>
+
+                <aside className="exploreSidebar" aria-label="Creators to follow">
+                  <div className="exploreSidebarCard">
+                    <div className="exploreSidebarHead">
+                      <div className="listTitle">Creators to follow</div>
+                    </div>
+
+                    {loadingCreators ? (
+                      <div className="exploreSidebarLoading" aria-hidden="true">
+                        <div className="exploreSidebarLoadingRow" />
+                        <div className="exploreSidebarLoadingRow" />
+                        <div className="exploreSidebarLoadingRow" />
+                      </div>
+                    ) : creatorsToRender.length === 0 ? (
+                      <div className="exploreSidebarEmpty">No creators yet</div>
+                    ) : (
+                      <div className="exploreCreatorList">
+                        {creatorsToRender.map((creator) => {
+                          const isFollowing = followedCreatorIds.includes(creator.id);
+                          const followWorking = !!followWorkingByCreatorId[creator.id];
+                          const followError = followErrorByCreatorId[creator.id] || "";
+                          const displayName = creator.displayName || creator.handle || "Stash user";
+                          return (
+                            <div key={`creator-${creator.id}`} className="exploreCreatorBlock">
+                              <div className="exploreCreatorRow">
+                                <Link className="exploreCreatorIdentity" to={`/@${creator.handle}`}>
+                                  <span className="exploreCreatorAvatar" aria-hidden="true">
+                                    {creator.avatarUrl ? (
+                                      <img src={creator.avatarUrl} alt="" />
+                                    ) : (
+                                      <span>{displayName.charAt(0).toUpperCase()}</span>
+                                    )}
+                                  </span>
+                                  <span className="exploreCreatorCopy">
+                                    <span className="exploreCreatorName">{displayName}</span>
+                                  </span>
+                                </Link>
+                                <button
+                                  className={`miniBtn exploreFollowBtn ${isFollowing ? "isFollowing" : ""}`}
+                                  type="button"
+                                  onClick={() => handleToggleFollowCreator(creator)}
+                                  disabled={followWorking || loadingCreatorFollows}
+                                >
+                                  {followWorking ? "..." : isFollowing ? "Following" : "Follow"}
+                                </button>
+                              </div>
+                              {followError ? <div className="exploreCreatorError">{followError}</div> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {creatorLoadError ? <div className="exploreSidebarError">{creatorLoadError}</div> : null}
+                  </div>
+                </aside>
+              </div>
+            </main>
           </div>
         </section>
       </AppShell>

@@ -5,7 +5,7 @@ import { LoginForm } from "./Login";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
-import PublicListCard from "../components/PublicListCard";
+import TrendingListCard from "../components/TrendingListCard";
 import { fetchFollowingFeed, fetchTrendingLists } from "../lib/socialDiscovery";
 import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
 import stashLogo from "../assets/icons/stash-favicon.png";
@@ -133,21 +133,34 @@ function decodeHtmlEntities(text = "") {
 }
 
 async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  async function postJsonWithTimeout(path, body, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      return await response.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-      signal: controller.signal,
-    });
-    const data = await res.json();
-    return data?.title || null;
+    const data = await postJsonWithTimeout(endpoint, { url }, timeoutMs);
+    const title = String(data?.title || "").trim();
+    if (title) return title;
+
+    const previewData = await postJsonWithTimeout("/fetch-link-preview", { url }, timeoutMs + 2000);
+    const previewTitle = String(previewData?.title || "").trim();
+    return previewTitle || null;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -282,7 +295,7 @@ export default function Home() {
   const previewCount = link ? 1 : bulkLinks.length;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showAllPreview, setShowAllPreview] = useState(false);
-  const [prefsOpen, setPrefsOpen] = useState(true);
+  const [prefsOpen, setPrefsOpen] = useState(false);
   const recentItems = useMemo(() => {
     const items = trips.flatMap((trip) =>
       (trip.items || []).map((item) => ({
@@ -921,18 +934,12 @@ export default function Home() {
               <>
                 {user ? (
                   <>
-                    <Link className="topbarPill subtle" to="/explore">
-                      Explore
-                    </Link>
                     <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
                       <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
                     </Link>
                   </>
                 ) : (
                   <>
-                    <Link className="topbarPill subtle" to="/explore">
-                      Explore
-                    </Link>
                     <Link className="topbarPill subtle" to="/login">
                       Sign in
                     </Link>
@@ -1105,14 +1112,13 @@ export default function Home() {
 
             <div className="homeSettingsCard">
               <div className="homePrefs">
-                <div className="optionsLabel">Preferences</div>
                 <button
                   className="prefsToggle"
                   type="button"
                   onClick={() => setPrefsOpen((prev) => !prev)}
                   aria-expanded={prefsOpen}
                 >
-                  Settings
+                  Preferences
                   <span className={`prefsChevron ${prefsOpen ? "open" : ""}`} aria-hidden="true" />
                 </button>
                 {prefsOpen && (
@@ -1245,7 +1251,7 @@ export default function Home() {
                 {feedLoading ? (
                   <div className="collectionsGrid homeFeedGrid">
                     {Array.from({ length: 6 }).map((_, index) => (
-                      <div key={index} className="publicListSkeleton" />
+                      <div key={index} className="trendingListSkeleton" />
                     ))}
                   </div>
                 ) : feedLists.length === 0 ? (
@@ -1267,14 +1273,13 @@ export default function Home() {
                   <>
                     <div className="collectionsGrid homeFeedGrid">
                       {feedLists.map((list) => (
-                        <PublicListCard
+                        <TrendingListCard
                           key={list.id}
                           list={list}
                           handle={list.owner_handle}
                           isSaved={!!feedSaveStateByListId[list.id]?.saved}
                           isSaving={!!feedSaveStateByListId[list.id]?.saving}
                           onSave={() => handleSaveFeedList(list)}
-                          onViewSaved={() => viewFeedSavedList(list)}
                         />
                       ))}
                     </div>

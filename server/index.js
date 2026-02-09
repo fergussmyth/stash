@@ -358,6 +358,33 @@ app.post("/fetch-airbnb-title", async (req, res) => {
   let page;
 
   try {
+    // First pass: lightweight HTML fetch. This is faster and avoids
+    // Playwright in common cases.
+    try {
+      const quickResponse = await fetch(cleanedUrl, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-GB,en;q=0.9",
+        },
+      });
+
+      if (quickResponse.ok) {
+        const quickHtml = await quickResponse.text();
+        const quickTitle =
+          extractTitleFromHtml(quickHtml) || extractJsonLdTitle(quickHtml) || "";
+        if (quickTitle && !looksLikeNotFoundTitle(quickTitle)) {
+          titleCache.set(cleanedUrl, quickTitle.trim());
+          return res.json({ title: quickTitle.trim() });
+        }
+      }
+    } catch {
+      // Continue to Playwright fallback.
+    }
+
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
       userAgent:

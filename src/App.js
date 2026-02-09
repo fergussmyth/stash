@@ -1,4 +1,12 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { useState, useEffect } from "react";
 import Home from "./pages/Home";
 import Trips from "./pages/Trips";
@@ -11,8 +19,6 @@ import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import PublicProfile from "./pages/PublicProfile";
 import PublicList from "./pages/PublicList";
-import MyLists from "./pages/MyLists";
-import ListEditor from "./pages/ListEditor";
 import Explore from "./pages/Explore";
 import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
@@ -240,9 +246,9 @@ function AppShell() {
         <Route path="/review" element={<Review />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/explore" element={<Explore />} />
-        <Route path="/lists" element={<MyLists />} />
-        <Route path="/lists/new" element={<ListEditor />} />
-        <Route path="/lists/:id/edit" element={<ListEditor />} />
+        <Route path="/lists" element={<Navigate to="/trips" replace />} />
+        <Route path="/lists/new" element={<Navigate to="/trips" replace />} />
+        <Route path="/lists/:id/edit" element={<Navigate to="/trips" replace />} />
         <Route path="/:handle/:listSlug" element={<PublicList />} />
         <Route path="/:handle" element={<PublicProfile />} />
         <Route path="/settings/extension" element={<ExtensionSettings />} />

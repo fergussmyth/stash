@@ -58,6 +58,7 @@ const COVER_PRIORITY: Record<string, number> = {
   gradient: 1,
   unsplash: 2,
   og: 3,
+  manual: 100,
 };
 const OG_BLOCKLIST = new Set([
   "booking.com",

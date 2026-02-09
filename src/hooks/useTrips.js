@@ -149,6 +149,14 @@ export function TripsProvider({ children }) {
       id: t.id,
       name: t.name,
       type: normalizeCategory(t.type),
+      subtitle: t.subtitle || "",
+      visibility: t.visibility || "private",
+      publicSlug: t.public_slug || "",
+      publishedAt: t.published_at || null,
+      isRanked: !!t.is_ranked,
+      rankedSize: t.ranked_size ?? null,
+      saveCount: Number(t.save_count || 0),
+      viewCount: Number(t.view_count || 0),
       pinned: !!t.pinned,
       icon: t.icon || null,
       color: t.color || null,
@@ -197,6 +205,14 @@ export function TripsProvider({ children }) {
       id: data.id,
       name: data.name,
       type: normalizeCategory(data.type),
+      subtitle: data.subtitle || "",
+      visibility: data.visibility || "private",
+      publicSlug: data.public_slug || "",
+      publishedAt: data.published_at || null,
+      isRanked: !!data.is_ranked,
+      rankedSize: data.ranked_size ?? null,
+      saveCount: Number(data.save_count || 0),
+      viewCount: Number(data.view_count || 0),
       pinned: !!data.pinned,
       icon: data.icon || null,
       color: data.color || null,
@@ -555,6 +571,25 @@ export function TripsProvider({ children }) {
     );
   }
 
+  async function updateTripCategory(tripId, nextType) {
+    if (!user) return false;
+    const normalizedType = normalizeCategory(nextType);
+    const { error } = await supabase
+      .from("trips")
+      .update({ type: normalizedType })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update collection section:", error.message);
+      return false;
+    }
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, type: normalizedType } : t))
+    );
+    return true;
+  }
+
   async function toggleItemPinned(tripId, itemId, nextPinned) {
     if (!user) return;
     const { error } = await supabase
@@ -650,8 +685,10 @@ export function TripsProvider({ children }) {
     enableShare,
     disableShare,
     toggleTripPinned,
+    updateTripCategory,
     toggleItemPinned,
     reloadTripItems,
+    reloadTrips: loadTrips,
     localImportAvailable,
     importLocalTrips,
   };

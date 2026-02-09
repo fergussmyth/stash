@@ -1,7 +1,8 @@
 import { supabase } from "./supabaseClient";
+import { mapCollectionRow, normalizeCollectionVisibility } from "./publishedCollections";
 
-const LIST_SELECT =
-  "id,owner_user_id,section,title,subtitle,slug,cover_image_url,visibility,is_ranked,ranked_size,pinned_order,save_count,view_count,last_saved_at,last_viewed_at,created_at,updated_at";
+const TRIP_SELECT =
+  "id,owner_id,name,type,subtitle,visibility,public_slug,published_at,is_ranked,ranked_size,cover_image_url,save_count,view_count,last_saved_at,last_viewed_at,created_at,updated_at,source_list_id";
 
 function parseMetaObject(meta) {
   if (!meta) return null;
@@ -21,13 +22,26 @@ function firstNonEmpty(values = []) {
   return "";
 }
 
+function normalizeSection(input = "") {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (normalized === "travel" || normalized === "fashion" || normalized === "general") {
+    return normalized;
+  }
+  return "general";
+}
+
 function extractImageFromMeta(meta) {
   const parsed = parseMetaObject(meta);
   if (!parsed || typeof parsed !== "object") return "";
+
   const direct = firstNonEmpty([
     parsed.image,
     parsed.image_url,
     parsed.imageUrl,
+    parsed.imageURL,
+    parsed.preview_image,
+    parsed.previewImage,
+    parsed.heroImageUrl,
     parsed.og_image,
     parsed.ogImage,
     parsed.thumbnail,
@@ -59,36 +73,37 @@ function extractImageFromMeta(meta) {
   return "";
 }
 
-function resolveListItemPreviewImage(row) {
-  const snapshot = String(row?.image_snapshot || "").trim();
-  if (snapshot) return snapshot;
+function resolveTripItemPreviewImage(row) {
+  const imageUrl = String(row?.image_url || "").trim();
+  if (imageUrl) return imageUrl;
 
-  const metaImage = extractImageFromMeta(row?.meta_json);
+  const metaImage = extractImageFromMeta(row?.metadata);
   if (metaImage) return metaImage;
+  const favicon = String(row?.favicon_url || "").trim();
+  if (favicon) return favicon;
   return "";
 }
 
-async function fetchListPreviewImageMap(listIds = []) {
-  const ids = [...new Set((listIds || []).filter(Boolean))];
+async function fetchCollectionPreviewImageMap(tripIds = []) {
+  const ids = [...new Set((tripIds || []).filter(Boolean))];
   const map = new Map();
   if (!ids.length) return map;
 
   const { data, error } = await supabase
-    .from("list_items")
-    .select("list_id,image_snapshot,domain_snapshot,url,meta_json,rank_index,created_at")
-    .in("list_id", ids)
-    .order("list_id", { ascending: true })
-    .order("rank_index", { ascending: true })
-    .order("created_at", { ascending: true });
+    .from("trip_items")
+    .select("trip_id,image_url,favicon_url,metadata,added_at")
+    .in("trip_id", ids)
+    .order("trip_id", { ascending: true })
+    .order("added_at", { ascending: false });
 
   if (error || !Array.isArray(data)) return map;
 
   for (const row of data) {
-    const listId = row?.list_id;
-    if (!listId || map.has(listId)) continue;
-    const imageUrl = resolveListItemPreviewImage(row);
-    if (!imageUrl) continue;
-    map.set(listId, imageUrl);
+    const tripId = row?.trip_id;
+    if (!tripId || map.has(tripId)) continue;
+    const image = resolveTripItemPreviewImage(row);
+    if (!image) continue;
+    map.set(tripId, image);
   }
 
   return map;
@@ -105,7 +120,7 @@ export async function hydrateListPreviewImages(rows = []) {
 
   if (!targetIds.length) return listRows;
 
-  const previewMap = await fetchListPreviewImageMap(targetIds);
+  const previewMap = await fetchCollectionPreviewImageMap(targetIds);
   if (!previewMap.size) return listRows;
 
   return listRows.map((row) => {
@@ -133,14 +148,7 @@ function normalizeSearchTerm(search = "") {
   return String(search || "").trim().toLowerCase();
 }
 
-function sanitizeSearchForFilter(search = "") {
-  return normalizeSearchTerm(search)
-    .replace(/[%(),"'`]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function dedupeListsById(rows = []) {
+function dedupeById(rows = []) {
   const seen = new Set();
   const deduped = [];
   for (const row of rows) {
@@ -157,13 +165,13 @@ function parseDateMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function fallbackTrendingScore(list) {
-  const saves = Number(list?.save_count || 0);
-  const views = Number(list?.view_count || 0);
+function fallbackTrendingScore(collection) {
+  const saves = Number(collection?.save_count || 0);
+  const views = Number(collection?.view_count || 0);
   const now = Date.now();
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-  const lastSavedAtMs = parseDateMs(list?.last_saved_at);
-  const lastViewedAtMs = parseDateMs(list?.last_viewed_at);
+  const lastSavedAtMs = parseDateMs(collection?.last_saved_at);
+  const lastViewedAtMs = parseDateMs(collection?.last_viewed_at);
 
   let score = saves * 3 + views;
   if (lastSavedAtMs && now - lastSavedAtMs <= sevenDaysMs) {
@@ -193,12 +201,17 @@ async function fetchProfilesMap(ownerIds = []) {
   return map;
 }
 
+function mapTripRow(row) {
+  return mapCollectionRow(row);
+}
+
 function enrichWithOwner(rows = [], profilesMap = new Map()) {
   return rows
     .map((row) => {
-      const owner = profilesMap.get(row.owner_user_id);
+      const owner = profilesMap.get(row.owner_id || row.owner_user_id);
+      const mapped = mapTripRow(row);
       return {
-        ...row,
+        ...mapped,
         owner_handle: owner?.handle || "",
         owner_display_name: owner?.display_name || owner?.handle || "Stash user",
         owner_avatar_url: owner?.avatar_url || "",
@@ -208,19 +221,22 @@ function enrichWithOwner(rows = [], profilesMap = new Map()) {
     .filter((row) => row.owner_is_public !== false && !!row.owner_handle);
 }
 
-function mapRpcRow(row) {
+function mapTrendingRpcRow(row) {
   return {
     id: row.id,
-    owner_user_id: row.owner_user_id,
-    section: row.section,
-    title: row.title,
+    owner_id: row.owner_id,
+    owner_user_id: row.owner_id,
+    type: normalizeSection(row.type),
+    section: normalizeSection(row.type),
+    name: row.name,
+    title: row.name,
     subtitle: row.subtitle ?? null,
-    slug: row.slug,
+    public_slug: row.public_slug || "",
+    slug: row.public_slug || "",
     cover_image_url: row.cover_image_url ?? null,
-    visibility: row.visibility,
+    visibility: normalizeCollectionVisibility(row.visibility),
     is_ranked: !!row.is_ranked,
     ranked_size: row.ranked_size ?? null,
-    pinned_order: row.pinned_order ?? null,
     save_count: Number(row.save_count || 0),
     view_count: Number(row.view_count || 0),
     created_at: row.created_at ?? null,
@@ -235,70 +251,80 @@ function mapRpcRow(row) {
   };
 }
 
-async function fetchNewestPublicRows({ section = null, limit = 120 }) {
+async function fetchNewestPublicTrips({ section = null, limit = 120 }) {
   let query = supabase
-    .from("lists")
-    .select(LIST_SELECT)
+    .from("trips")
+    .select(TRIP_SELECT)
     .eq("visibility", "public")
+    .not("public_slug", "is", null)
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (section) query = query.eq("section", section);
+  if (section) query = query.eq("type", section);
 
   const { data, error } = await query;
   if (error) return [];
   return data || [];
 }
 
-async function fetchFallbackTrendingRows({ section = null, search = "", limit = 120 }) {
-  const normalizedSearch = sanitizeSearchForFilter(search);
-  let titleRows = [];
-  let ownerRows = [];
+export async function fetchNewestPublicLists({
+  section = "all",
+  search = "",
+  limit = 24,
+  offset = 0,
+} = {}) {
+  const safeLimit = clamp(Number(limit) || 24, 1, 60);
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const sectionFilter = normalizeSectionFilter(section);
+  const normalizedSearch = normalizeSearchTerm(search);
 
-  let titleQuery = supabase
-    .from("lists")
-    .select(LIST_SELECT)
+  let query = supabase
+    .from("trips")
+    .select(TRIP_SELECT)
     .eq("visibility", "public")
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .not("public_slug", "is", null)
+    .order("created_at", { ascending: false });
 
-  if (section) titleQuery = titleQuery.eq("section", section);
-
-  if (normalizedSearch) {
-    titleQuery = titleQuery.or(
-      `title.ilike.%${normalizedSearch}%,subtitle.ilike.%${normalizedSearch}%`
-    );
+  if (sectionFilter) {
+    query = query.eq("type", sectionFilter);
+  }
+  const fetchUpperBound = Math.min(800, safeOffset + safeLimit * (normalizedSearch ? 10 : 3));
+  const { data, error } = await query.range(0, fetchUpperBound);
+  if (error) {
+    return { lists: [], hasMore: false, error };
   }
 
-  const { data: titleData } = await titleQuery;
-  titleRows = titleData || [];
-
-  if (normalizedSearch) {
-    const { data: ownerMatches } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("is_public", true)
-      .or(`handle.ilike.%${normalizedSearch}%,display_name.ilike.%${normalizedSearch}%`)
-      .limit(limit);
-
-    const ownerIds = (ownerMatches || []).map((row) => row.id).filter(Boolean);
-    if (ownerIds.length) {
-      let ownerQuery = supabase
-        .from("lists")
-        .select(LIST_SELECT)
-        .eq("visibility", "public")
-        .in("owner_user_id", ownerIds)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-
-      if (section) ownerQuery = ownerQuery.eq("section", section);
-
-      const { data: ownerData } = await ownerQuery;
-      ownerRows = ownerData || [];
-    }
+  const rows = data || [];
+  if (!rows.length) {
+    return { lists: [], hasMore: false, error: null };
   }
 
-  return dedupeListsById([...titleRows, ...ownerRows]);
+  const profileMap = await fetchProfilesMap(rows.map((row) => row.owner_id));
+  const enriched = dedupeById(
+    enrichWithOwner(rows, profileMap).filter((row) => matchesSearch(row, normalizedSearch))
+  );
+  const paged = enriched.slice(safeOffset, safeOffset + safeLimit + 1);
+  const hydrated = await hydrateListPreviewImages(paged);
+  const hasMore = hydrated.length > safeLimit;
+  return {
+    lists: hydrated.slice(0, safeLimit),
+    hasMore,
+    error: null,
+  };
+}
+
+function matchesSearch(row, normalizedSearch = "") {
+  if (!normalizedSearch) return true;
+  const haystack = [
+    row.title,
+    row.name,
+    row.subtitle,
+    row.owner_handle,
+    row.owner_display_name,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" \n ");
+  return haystack.includes(normalizedSearch);
 }
 
 export async function fetchTrendingLists({
@@ -313,16 +339,16 @@ export async function fetchTrendingLists({
   const normalizedSearch = normalizeSearchTerm(search);
   const rpcLimit = safeLimit + 1;
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc("get_trending_lists", {
+  const rpcResponse = await supabase.rpc("get_trending_collections", {
     p_section: sectionFilter,
     p_search: normalizedSearch || null,
     p_limit: rpcLimit,
     p_offset: safeOffset,
   });
 
-  if (!rpcError && Array.isArray(rpcData)) {
-    const hasMore = rpcData.length > safeLimit;
-    const mappedRows = rpcData.slice(0, safeLimit).map(mapRpcRow);
+  if (!rpcResponse.error && Array.isArray(rpcResponse.data)) {
+    const hasMore = rpcResponse.data.length > safeLimit;
+    const mappedRows = rpcResponse.data.slice(0, safeLimit).map(mapTrendingRpcRow);
     const hydratedRows = await hydrateListPreviewImages(mappedRows);
     return {
       lists: hydratedRows,
@@ -331,23 +357,15 @@ export async function fetchTrendingLists({
     };
   }
 
-  const candidateLimit = Math.max(90, safeLimit * 4);
-  let rows = await fetchFallbackTrendingRows({
-    section: sectionFilter,
-    search: normalizedSearch,
-    limit: candidateLimit,
-  });
-
-  if (!rows.length && !normalizedSearch) {
-    rows = await fetchNewestPublicRows({ section: sectionFilter, limit: candidateLimit });
-  }
-
+  const candidateLimit = Math.max(120, safeLimit * 4);
+  const rows = await fetchNewestPublicTrips({ section: sectionFilter, limit: candidateLimit });
   if (!rows.length) {
     return { lists: [], hasMore: false, source: "fallback" };
   }
 
-  const profileMap = await fetchProfilesMap(rows.map((row) => row.owner_user_id));
+  const profileMap = await fetchProfilesMap(rows.map((row) => row.owner_id));
   const enriched = enrichWithOwner(rows, profileMap)
+    .filter((row) => matchesSearch(row, normalizedSearch))
     .map((row) => ({ ...row, trending_score: fallbackTrendingScore(row) }))
     .sort((a, b) => {
       const scoreDiff = Number(b.trending_score || 0) - Number(a.trending_score || 0);
@@ -355,7 +373,7 @@ export async function fetchTrendingLists({
       return parseDateMs(b.created_at) - parseDateMs(a.created_at);
     });
 
-  const paged = enriched.slice(safeOffset, safeOffset + safeLimit + 1);
+  const paged = dedupeById(enriched).slice(safeOffset, safeOffset + safeLimit + 1);
   const hydratedPaged = await hydrateListPreviewImages(paged);
   const hasMore = hydratedPaged.length > safeLimit;
   return {
@@ -392,27 +410,28 @@ export async function fetchFollowingFeed({
     return { lists: [], hasMore: false, followingCount: 0 };
   }
 
-  const { data: listRows, error: listError } = await supabase
-    .from("lists")
-    .select(LIST_SELECT)
-    .in("owner_user_id", followingIds)
+  const { data: tripRows, error: tripError } = await supabase
+    .from("trips")
+    .select(TRIP_SELECT)
+    .in("owner_id", followingIds)
     .eq("visibility", "public")
+    .not("public_slug", "is", null)
     .order("created_at", { ascending: false })
     .range(safeOffset, safeOffset + safeLimit);
 
-  if (listError) {
+  if (tripError) {
     return {
       lists: [],
       hasMore: false,
       followingCount: followingIds.length,
-      error: listError,
+      error: tripError,
     };
   }
 
-  const rows = listRows || [];
+  const rows = tripRows || [];
   const hasMore = rows.length > safeLimit;
   const pagedRows = rows.slice(0, safeLimit);
-  const profileMap = await fetchProfilesMap(pagedRows.map((row) => row.owner_user_id));
+  const profileMap = await fetchProfilesMap(pagedRows.map((row) => row.owner_id));
   const lists = await hydrateListPreviewImages(enrichWithOwner(pagedRows, profileMap));
   return {
     lists,

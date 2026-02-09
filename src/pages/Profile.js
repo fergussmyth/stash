@@ -72,7 +72,7 @@ export default function Profile() {
     async function loadProfile() {
       const { data } = await supabase
         .from("profiles")
-        .select("display_name, avatar_url")
+        .select("display_name, handle, avatar_url")
         .eq("id", user.id)
         .single();
       if (!mounted) return;
@@ -144,6 +144,7 @@ export default function Profile() {
       setStatus("Could not save right now.");
       return;
     }
+    setInitialDisplayName(displayName);
     setStatus("Saved.");
     if (rememberMeEnabled && typeof window !== "undefined") {
       try {
@@ -492,6 +493,7 @@ export default function Profile() {
   }
 
   const isDisplayNameDirty = displayName.trim() !== initialDisplayName.trim();
+  const canSaveIdentity = isDisplayNameDirty;
   const visibleTokens = useMemo(() => {
     if (showRevokedTokens) return tokens;
     return tokens.filter((token) => !token.revoked_at);
@@ -810,9 +812,9 @@ export default function Profile() {
                   onChange={(e) => setDisplayName(e.target.value)}
                 />
                 <button
-                  className={`profilePrimaryBtn ${isDisplayNameDirty ? "isActive" : ""}`}
+                  className={`profilePrimaryBtn ${canSaveIdentity ? "isActive" : ""}`}
                   type="submit"
-                  disabled={saving || !isDisplayNameDirty}
+                  disabled={saving || !canSaveIdentity}
                 >
                   {saving ? "Saving..." : "Save"}
                 </button>

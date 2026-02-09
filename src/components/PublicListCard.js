@@ -24,6 +24,8 @@ export default function PublicListCard({
   handle,
   isSaved = false,
   isSaving = false,
+  showCreator = false,
+  compact = false,
   onSave = null,
   onViewSaved = null,
 }) {
@@ -44,11 +46,13 @@ export default function PublicListCard({
     .replace(/^@+/, "")
     .toLowerCase();
   const to = ownerHandle && list?.slug ? `/@${ownerHandle}/${list.slug}` : "";
+  const ownerAvatarUrl = String(list?.owner_avatar_url || "").trim();
+  const ownerDisplayName = String(list?.owner_display_name || ownerHandle || "Stash user");
 
   const cardContent = (
     <>
       <div
-        className={`collectionCardCover ${coverLoaded ? "isLoaded" : ""}`}
+        className={`collectionCardCover ${compact ? "compact" : ""} ${coverLoaded ? "isLoaded" : ""}`}
         style={{ backgroundImage: coverBackground }}
         aria-hidden="true"
       >
@@ -63,6 +67,20 @@ export default function PublicListCard({
         )}
       </div>
       <div className="collectionCardBody">
+        {showCreator ? (
+          <div className="publicListCreatorRow">
+            <span className="publicListCreatorAvatar" aria-hidden="true">
+              {ownerAvatarUrl ? (
+                <img src={ownerAvatarUrl} alt="" />
+              ) : (
+                <span>{ownerDisplayName.charAt(0).toUpperCase()}</span>
+              )}
+            </span>
+            <span className="publicListCreatorMeta">
+              <span className="publicListCreatorHandle">{ownerDisplayName}</span>
+            </span>
+          </div>
+        ) : null}
         <div className="publicListTitleRow">
           <div className="tripName">{list.title || "Untitled list"}</div>
           <span className="tripCategory">{sectionLabel(list.section)}</span>
@@ -80,7 +98,11 @@ export default function PublicListCard({
 
   if (to && !canSave) {
     return (
-      <Link className="collectionCard publicListCard" to={to} aria-label={list.title || "List"}>
+      <Link
+        className={`collectionCard publicListCard ${compact ? "compact" : ""}`}
+        to={to}
+        aria-label={list.title || "List"}
+      >
         {cardContent}
       </Link>
     );
@@ -88,7 +110,10 @@ export default function PublicListCard({
 
   if (to && canSave) {
     return (
-      <article className="collectionCard publicListCard withActions" aria-label={list.title || "List"}>
+      <article
+        className={`collectionCard publicListCard withActions ${compact ? "compact" : ""}`}
+        aria-label={list.title || "List"}
+      >
         <Link className="publicListCardMain" to={to} aria-label={list.title || "List"}>
           {cardContent}
         </Link>
@@ -107,7 +132,10 @@ export default function PublicListCard({
   }
 
   return (
-    <article className="collectionCard publicListCard withActions" aria-label={list.title || "List"}>
+    <article
+      className={`collectionCard publicListCard withActions ${compact ? "compact" : ""}`}
+      aria-label={list.title || "List"}
+    >
       <div className="publicListCardMain">{cardContent}</div>
       {canSave ? (
         <div className="publicListCardActions">

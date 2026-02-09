@@ -4,7 +4,6 @@ const PRIMARY_NAV = [
   { label: "Home", to: "/", icon: "home" },
   { label: "Explore", to: "/explore", icon: "spark" },
   { label: "Collections", to: "/trips", icon: "grid" },
-  { label: "Lists", to: "/lists", icon: "list" },
   { label: "Review", to: "/review", icon: "check" },
   { label: "Profile", to: "/profile", icon: "user" },
 ];
