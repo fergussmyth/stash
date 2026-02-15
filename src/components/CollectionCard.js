@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 function makeFallbackGradient(seed) {
   let hash = 0;
@@ -47,6 +47,7 @@ export default function CollectionCard({
     { value: "fashion", label: "Fashion" },
   ];
   const [coverLoaded, setCoverLoaded] = useState(false);
+  const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
   const linkCount = trip.items?.length || 0;
   const coverSeed = useMemo(() => `${trip.id || ""}-${trip.name || ""}`, [trip.id, trip.name]);
   const fallbackGradient = useMemo(() => makeFallbackGradient(coverSeed), [coverSeed]);
@@ -66,6 +67,10 @@ export default function CollectionCard({
       ? "Decided"
       : "";
 
+  useEffect(() => {
+    if (!menuOpen) setSectionMenuOpen(false);
+  }, [menuOpen]);
+
   return (
     <div
       className={`collectionCard ${trip.pinned ? "pinned" : ""} ${
@@ -78,9 +83,19 @@ export default function CollectionCard({
         onOpen();
       }}
       onKeyDown={(event) => {
+        if (isEditing) return;
         if (event.key === "Enter" || event.key === " ") {
+          const target = event.target;
+          if (
+            target instanceof HTMLElement &&
+            (target.tagName === "INPUT" ||
+              target.tagName === "TEXTAREA" ||
+              target.tagName === "SELECT" ||
+              target.isContentEditable)
+          ) {
+            return;
+          }
           event.preventDefault();
-          if (isEditing) return;
           onOpen();
         }
       }}
@@ -151,18 +166,37 @@ export default function CollectionCard({
                       </button>
                       {typeof onChangeSection === "function" ? (
                         <>
-                          <div className="tripMenuSectionLabel">Move to section</div>
-                          {sectionOptions.map((option) => (
-                            <button
-                              key={option.value}
-                              className={`tripMenuItem ${section === option.value ? "active" : ""}`}
-                              type="button"
-                              disabled={section === option.value}
-                              onClick={() => onChangeSection(option.value)}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
+                          <button
+                            className={`tripMenuItem hasSubmenu ${sectionMenuOpen ? "isOpen" : ""}`}
+                            type="button"
+                            onClick={() => setSectionMenuOpen((prev) => !prev)}
+                            aria-haspopup="menu"
+                            aria-expanded={sectionMenuOpen}
+                          >
+                            <span>Move to section</span>
+                            <span className="tripMenuItemCaret" aria-hidden="true">
+                              ›
+                            </span>
+                          </button>
+                          {sectionMenuOpen ? (
+                            <div className="tripSubMenu" role="menu" aria-label="Move to section">
+                              <div className="tripMenuSectionLabel">Move to section</div>
+                              {sectionOptions.map((option) => (
+                                <button
+                                  key={option.value}
+                                  className={`tripMenuItem ${section === option.value ? "active" : ""}`}
+                                  type="button"
+                                  disabled={section === option.value}
+                                  onClick={() => {
+                                    onChangeSection(option.value);
+                                    setSectionMenuOpen(false);
+                                  }}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         </>
                       ) : null}
                       {typeof onPublish === "function" ? (

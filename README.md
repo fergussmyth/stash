@@ -51,11 +51,13 @@ REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
 REACT_APP_SHARE_ORIGIN=https://your-public-domain.com
 ```
 
-Set this Supabase Edge Function secret to enable automatic topic-based cover photos:
+Optional: set this Supabase Edge Function secret to use Unsplash as an extra cover source:
 
 ```bash
 supabase secrets set UNSPLASH_ACCESS_KEY=your_unsplash_access_key
 ```
+
+Automatic cover generation works without Unsplash by using Wikimedia/Wikipedia lookups, then query-based fallback image providers, and only then gradients.
 
 ## Short roadmap
 - Better parsing of TikTok comments and other short-link formats.

@@ -193,7 +193,11 @@ export function TripsProvider({ children }) {
         setTrips(mapped);
       });
       const missingCoverTripIds = mapped
-        .filter((trip) => !String(trip.coverImageUrl || "").trim())
+        .filter((trip) => {
+          const hasCover = !!String(trip.coverImageUrl || "").trim();
+          const isGradientOnly = String(trip.coverImageSource || "").trim() === "gradient";
+          return !hasCover || isGradientOnly;
+        })
         .map((trip) => trip.id)
         .slice(0, 4);
       for (const tripId of missingCoverTripIds) {

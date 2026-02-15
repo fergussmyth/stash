@@ -1133,7 +1133,7 @@ body {
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
-  overflow: visible;
+  overflow: hidden;
   z-index: 0;
   box-shadow: 0 12px 28px rgba(2, 6, 23, 0.42);
   align-self: start;
@@ -1147,6 +1147,11 @@ body {
 
 .collectionCard.menuOpen {
   z-index: 120;
+  overflow: visible;
+}
+
+.collectionCard.menuOpen .collectionCardCover {
+  overflow: visible;
 }
 
 .collectionCard:focus-visible {
@@ -1159,7 +1164,7 @@ body {
   width: 100%;
   padding-top: 66%;
   background: linear-gradient(120deg, rgba(56, 189, 248, 0.2), rgba(15, 23, 42, 0.2));
-  overflow: visible;
+  overflow: hidden;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
 }
@@ -2183,6 +2188,70 @@ body {
 
   .homeShell .homeRecentItem {
     padding: 12px;
+  }
+
+  .homeShell .homeRecent {
+    gap: 6px;
+  }
+
+  .homeShell .homeRecentLabel {
+    margin-top: 2px;
+  }
+
+  .homeShell .homeRecentCarousel {
+    grid-auto-columns: minmax(220px, 80%);
+    gap: 8px;
+    padding: 2px 2px 4px;
+  }
+
+  .homeShell .homeRecentItem {
+    min-height: 58px;
+    padding: 10px 11px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .homeShell .homeRecentIcon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .homeShell .homeRecentIcon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .homeShell .homeRecentMeta {
+    gap: 3px;
+  }
+
+  .homeShell .homeRecentTitle {
+    font-size: 13px;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .homeShell .homeRecentSub {
+    font-size: 10px;
+  }
+
+  .homeShell .homeRecentActions {
+    gap: 6px;
+  }
+
+  .homeShell .homeRecentAction {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .homeShell .homeRecentAction svg {
+    width: 14px;
+    height: 14px;
   }
 
   .homeShell .panelHeaderTitle {
@@ -5934,6 +6003,21 @@ h1 span {
   z-index: 80;
 }
 
+.tripSubMenu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  min-width: 160px;
+  background: rgba(10, 15, 28, 0.98);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+  display: grid;
+  gap: 6px;
+  z-index: 81;
+}
+
 .tripMenuSectionLabel {
   padding: 4px 10px 2px;
   font-size: 11px;
@@ -5956,6 +6040,22 @@ h1 span {
   cursor: pointer;
 }
 
+.tripMenuItem.hasSubmenu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tripMenuItemCaret {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.tripMenuItem.hasSubmenu.isOpen {
+  background: rgba(148, 163, 184, 0.12);
+}
+
 .tripMenuItem:hover {
   background: rgba(148, 163, 184, 0.12);
 }
@@ -5968,6 +6068,13 @@ h1 span {
 
 .tripMenuItem.danger {
   color: #fecaca;
+}
+
+@media (max-width: 900px) {
+  .tripSubMenu {
+    top: calc(100% + 8px);
+    right: 0;
+  }
 }
 
 .iconBtn.danger {
@@ -8589,6 +8696,20 @@ h1 span {
 .exploreCreatorList {
   display: grid;
   gap: 10px;
+}
+
+.exploreCreatorGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.exploreCreatorGroupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.95);
+  padding: 0 2px;
 }
 
 .exploreCreatorBlock {

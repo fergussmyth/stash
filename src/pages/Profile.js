@@ -26,6 +26,11 @@ function makeFallbackGradient(seed) {
   return `linear-gradient(140deg, ${pick(0)} 0%, ${pick(2)} 55%, ${pick(4)} 100%)`;
 }
 
+function isGradientCover(value = "") {
+  const normalized = String(value || "").trim();
+  return normalized.startsWith("linear-gradient") || normalized.startsWith("radial-gradient");
+}
+
 function normalizeSection(section = "") {
   const normalized = String(section || "").trim().toLowerCase();
   if (normalized === "travel") return "travel";
@@ -429,8 +434,12 @@ export default function Profile() {
                   <section className="profileShowcaseGrid" aria-label="Collections">
                     {collectionsForTab.map((trip) => {
                       const section = normalizeSection(trip.type);
-                      const coverImage = trip.coverImageUrl || "";
+                      const coverImage = String(trip.coverImageUrl || "").trim();
                       const fallbackGradient = makeFallbackGradient(`${trip.id}-${trip.name || "trip"}`);
+                      const gradientCover =
+                        isGradientCover(coverImage) || String(trip.coverImageSource || "").trim() === "gradient";
+                      const imageCover = !!coverImage && !gradientCover && !coverImage.startsWith("data:");
+                      const coverBackground = gradientCover ? coverImage || fallbackGradient : fallbackGradient;
 
                       return (
                         <button
@@ -439,8 +448,8 @@ export default function Profile() {
                           type="button"
                           onClick={() => navigate(`/trips/${trip.id}`)}
                         >
-                          <div className="profileShowcaseCardMedia" style={{ backgroundImage: fallbackGradient }}>
-                            {coverImage ? <img src={coverImage} alt="" loading="lazy" /> : null}
+                          <div className="profileShowcaseCardMedia" style={{ backgroundImage: coverBackground }}>
+                            {imageCover ? <img src={coverImage} alt="" loading="lazy" /> : null}
                             <div className="profileShowcaseCardShade" />
                             <div className="profileShowcaseCardBody">
                               <div className="profileShowcaseCardTitle">{trip.name || "Untitled collection"}</div>
@@ -505,21 +514,26 @@ export default function Profile() {
                   <div className="profileShowcaseRailEmpty">Loading...</div>
                 ) : activityItems.length > 0 ? (
                   <div className="profileShowcaseRailList">
-                    {activityItems.slice(0, 4).map((item) => (
-                      <div key={item.id} className="profileShowcaseRailItem">
-                        <div className="profileShowcaseRailThumb" aria-hidden="true">
-                          {item.mediaUrl ? (
-                            <img src={item.mediaUrl} alt="" />
-                          ) : (
-                            <span>{initialForProfile(profile, user)}</span>
-                          )}
+                    {activityItems.slice(0, 4).map((item) => {
+                      const mediaUrl = String(item.mediaUrl || "").trim();
+                      const gradientThumb = isGradientCover(mediaUrl);
+                      const imageThumb = !!mediaUrl && !gradientThumb;
+                      return (
+                        <div key={item.id} className="profileShowcaseRailItem">
+                          <div
+                            className="profileShowcaseRailThumb"
+                            aria-hidden="true"
+                            style={gradientThumb ? { backgroundImage: mediaUrl, backgroundSize: "cover" } : undefined}
+                          >
+                            {imageThumb ? <img src={mediaUrl} alt="" /> : <span>{initialForProfile(profile, user)}</span>}
+                          </div>
+                          <div className="profileShowcaseRailCopy">
+                            <div className="profileShowcaseRailTitle">{item.title}</div>
+                            <div className="profileShowcaseRailMeta">{item.when}</div>
+                          </div>
                         </div>
-                        <div className="profileShowcaseRailCopy">
-                          <div className="profileShowcaseRailTitle">{item.title}</div>
-                          <div className="profileShowcaseRailMeta">{item.when}</div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="profileShowcaseRailEmpty">No recent updates.</div>

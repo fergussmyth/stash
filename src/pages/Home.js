@@ -130,6 +130,29 @@ function isAirbnbItem(item) {
   return domain.includes("airbnb.") || url.includes("airbnb.");
 }
 
+function isAirbnbFallbackTitle(title = "") {
+  return /^airbnb room(?:\s+\d+)?$/i.test(String(title || "").trim());
+}
+
+function sanitizeAirbnbTitleForHome(input = "") {
+  let title = String(input || "").trim();
+  if (!title) return "";
+
+  title = title.replace(/\s*[-|]\s*airbnb\s*$/i, "").trim();
+  title = title.split(/\s[·•]\s/)[0].trim();
+  title = title.split(/\s\|\s/)[0].trim();
+
+  const metadataStart = title.search(
+    /\s(?:[⭐★]|(?:\d+(?:\.\d+)?)\s*(?:stars?|rating)|\d+\s*(?:beds?|bedrooms?|bath(?:room)?s?|guests?)|entire\s|private\s+room|shared\s+room|superhost\b)/i
+  );
+  if (metadataStart > 0) {
+    title = title.slice(0, metadataStart).trim();
+  }
+
+  title = title.replace(/\s*[,|•·-]\s*$/, "").trim();
+  return title;
+}
+
 function recentTitleForItem(item) {
   const rawTitle = String(item?.title || "").trim();
   if (!rawTitle) return item?.domain || "Stashed link";
@@ -138,8 +161,7 @@ function recentTitleForItem(item) {
 
   // Airbnb pages often append metadata like rating/bedrooms using separators.
   if (isAirbnbItem(item)) {
-    title = title.split(/\s[·•]\s/)[0].trim();
-    title = title.split(/\s\|\s/)[0].trim();
+    title = sanitizeAirbnbTitleForHome(title);
   }
 
   return title || item?.domain || "Stashed link";
@@ -224,6 +246,8 @@ export default function Home() {
   const [feedError, setFeedError] = useState("");
   const [feedSaveStateByListId, setFeedSaveStateByListId] = useState({});
   const feedRequestRef = useRef(0);
+  const recentTitleCacheRef = useRef(new Map());
+  const [resolvedRecentTitlesByItemId, setResolvedRecentTitlesByItemId] = useState({});
 
   const pendingTripKey = "pending_trip_create_name";
   const pendingTripTypeKey = "pending_trip_create_type";
@@ -331,6 +355,51 @@ export default function Home() {
   }, [trips]);
 
   useEffect(() => {
+    let active = true;
+
+    const candidates = recentItems
+      .filter((item) => isAirbnbItem(item))
+      .map((item) => {
+        const displayTitle = recentTitleForItem(item);
+        if (!isAirbnbFallbackTitle(displayTitle)) return null;
+        const url = cleanUrl(item.url || item.originalUrl || item.airbnbUrl || "");
+        if (!url) return null;
+        return { id: item.id, url, currentTitle: displayTitle };
+      })
+      .filter(Boolean);
+
+    if (!candidates.length) return () => { active = false; };
+
+    (async () => {
+      const nextResolved = {};
+
+      for (const candidate of candidates) {
+        const cached = recentTitleCacheRef.current.get(candidate.url);
+        if (typeof cached === "string") {
+          if (cached) nextResolved[candidate.id] = cached;
+          continue;
+        }
+
+        const fetched =
+          (await fetchTitleWithTimeout("/fetch-airbnb-title", candidate.url, 4500)) ||
+          (await fetchTitleWithTimeout("/fetch-link-preview", candidate.url, 5000));
+        const decoded = sanitizeAirbnbTitleForHome(
+          decodeHtmlEntities(String(fetched || "").trim())
+        );
+        recentTitleCacheRef.current.set(candidate.url, decoded || "");
+        if (decoded) nextResolved[candidate.id] = decoded;
+      }
+
+      if (!active || !Object.keys(nextResolved).length) return;
+      setResolvedRecentTitlesByItemId((prev) => ({ ...prev, ...nextResolved }));
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [recentItems]);
+
+  useEffect(() => {
     if (hasPreviewItems) {
       setPreviewOpen(true);
     } else {
@@ -365,6 +434,7 @@ export default function Home() {
     feedMode === "following"
       ? "Newest public lists from creators you follow."
       : "No followed activity yet, so these are trending this week.";
+  const showTrendingCarousel = feedMode === "trending";
 
   function mergeUniqueLists(prevRows, nextRows) {
     const seen = new Set(prevRows.map((row) => row.id));
@@ -1270,7 +1340,13 @@ export default function Home() {
                 {feedError ? <div className="warning">{feedError}</div> : null}
 
                 {feedLoading ? (
-                  <div className="collectionsGrid homeFeedGrid">
+                  <div
+                    className={
+                      showTrendingCarousel
+                        ? "trendingRow homeFeedGrid skeletonRow"
+                        : "collectionsGrid homeFeedGrid"
+                    }
+                  >
                     {Array.from({ length: 6 }).map((_, index) => (
                       <div key={index} className="trendingListSkeleton" />
                     ))}
@@ -1292,7 +1368,13 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
-                    <div className="collectionsGrid homeFeedGrid">
+                    <div
+                      className={
+                        showTrendingCarousel
+                          ? "trendingRow homeFeedGrid"
+                          : "collectionsGrid homeFeedGrid"
+                      }
+                    >
                       {feedLists.map((list) => (
                         <TrendingListCard
                           key={list.id}
@@ -1352,7 +1434,7 @@ export default function Home() {
                       </div>
                       <div className="homeRecentMeta">
                         <div className="homeRecentTitle">
-                          {recentTitleForItem(item)}
+                          {resolvedRecentTitlesByItemId[item.id] || recentTitleForItem(item)}
                         </div>
                         <div className="homeRecentSub">
                           {item.url || item.originalUrl || item.domain || "—"}

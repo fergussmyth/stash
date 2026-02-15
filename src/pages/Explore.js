@@ -245,6 +245,23 @@ export default function Explore() {
     () => filteredCreators.slice(0, creatorVisibleCount),
     [filteredCreators, creatorVisibleCount]
   );
+  const followedCreatorIdSet = useMemo(() => new Set(followedCreatorIds), [followedCreatorIds]);
+  const creatorGroupsToRender = useMemo(
+    () =>
+      [
+        {
+          key: "following",
+          label: "Following",
+          creators: creatorsToRender.filter((creator) => followedCreatorIdSet.has(creator.id)),
+        },
+        {
+          key: "suggested",
+          label: "Suggested",
+          creators: creatorsToRender.filter((creator) => !followedCreatorIdSet.has(creator.id)),
+        },
+      ].filter((group) => group.creators.length > 0),
+    [creatorsToRender, followedCreatorIdSet]
+  );
   const hasMoreCreators = creatorsToRender.length < filteredCreators.length;
 
   useEffect(() => {
@@ -638,7 +655,6 @@ export default function Explore() {
       setFollowErrorByCreatorId((prev) => ({ ...prev, [creatorId]: "Could not follow right now." }));
     } else {
       setFollowedCreatorIds((prev) => (prev.includes(creatorId) ? prev : [...prev, creatorId]));
-      setToast("Following");
     }
     setFollowWorkingByCreatorId((prev) => ({ ...prev, [creatorId]: false }));
   }
@@ -873,47 +889,52 @@ export default function Explore() {
               <div className="exploreSidebarEmpty">No creators match your search.</div>
             ) : (
               <div className="exploreCreatorList">
-                {creatorsToRender.map((creator) => {
-                  const isFollowing = followedCreatorIds.includes(creator.id);
-                  const followWorking = !!followWorkingByCreatorId[creator.id];
-                  const followError = followErrorByCreatorId[creator.id] || "";
-                  const displayName = creator.displayName || creator.handle || "Stash user";
-                  const creatorHandle = normalizeHandle(creator.handle || "");
-                  const creatorRouteKey = creatorHandle || String(creator.id || "").trim();
-                  const creatorHref = creatorRouteKey ? `/@${creatorRouteKey}` : "/explore";
-                  return (
-                    <div key={`creator-${creator.id}`} className="exploreCreatorBlock">
-                      <div className="exploreCreatorRow">
-                        <Link
-                          className="exploreCreatorIdentity"
-                          to={creatorHref}
-                          onClick={() => setFollowingPanelOpen(false)}
-                        >
-                          <span className="exploreCreatorAvatar" aria-hidden="true">
-                            {creator.avatarUrl ? (
-                              <img src={creator.avatarUrl} alt="" />
-                            ) : (
-                              <span>{displayName.charAt(0).toUpperCase()}</span>
-                            )}
-                          </span>
-                          <span className="exploreCreatorCopy">
-                            <span className="exploreCreatorName">{displayName}</span>
-                            {creatorHandle ? <span className="exploreCreatorHandle">@{creatorHandle}</span> : null}
-                          </span>
-                        </Link>
-                        <button
-                          className={`miniBtn exploreFollowBtn ${isFollowing ? "isFollowing" : ""}`}
-                          type="button"
-                          onClick={() => handleToggleFollowCreator(creator)}
-                          disabled={followWorking || loadingCreatorFollows}
-                        >
-                          {followWorking ? "..." : isFollowing ? "Following" : "Follow"}
-                        </button>
-                      </div>
-                      {followError ? <div className="exploreCreatorError">{followError}</div> : null}
-                    </div>
-                  );
-                })}
+                {creatorGroupsToRender.map((group) => (
+                  <section key={`creator-group-${group.key}`} className="exploreCreatorGroup">
+                    <div className="exploreCreatorGroupTitle">{group.label}</div>
+                    {group.creators.map((creator) => {
+                      const isFollowing = followedCreatorIdSet.has(creator.id);
+                      const followWorking = !!followWorkingByCreatorId[creator.id];
+                      const followError = followErrorByCreatorId[creator.id] || "";
+                      const displayName = creator.displayName || creator.handle || "Stash user";
+                      const creatorHandle = normalizeHandle(creator.handle || "");
+                      const creatorRouteKey = creatorHandle || String(creator.id || "").trim();
+                      const creatorHref = creatorRouteKey ? `/@${creatorRouteKey}` : "/explore";
+                      return (
+                        <div key={`creator-${creator.id}`} className="exploreCreatorBlock">
+                          <div className="exploreCreatorRow">
+                            <Link
+                              className="exploreCreatorIdentity"
+                              to={creatorHref}
+                              onClick={() => setFollowingPanelOpen(false)}
+                            >
+                              <span className="exploreCreatorAvatar" aria-hidden="true">
+                                {creator.avatarUrl ? (
+                                  <img src={creator.avatarUrl} alt="" />
+                                ) : (
+                                  <span>{displayName.charAt(0).toUpperCase()}</span>
+                                )}
+                              </span>
+                              <span className="exploreCreatorCopy">
+                                <span className="exploreCreatorName">{displayName}</span>
+                                {creatorHandle ? <span className="exploreCreatorHandle">@{creatorHandle}</span> : null}
+                              </span>
+                            </Link>
+                            <button
+                              className={`miniBtn exploreFollowBtn ${isFollowing ? "isFollowing" : ""}`}
+                              type="button"
+                              onClick={() => handleToggleFollowCreator(creator)}
+                              disabled={followWorking || loadingCreatorFollows}
+                            >
+                              {followWorking ? "..." : isFollowing ? "Following" : "Follow"}
+                            </button>
+                          </div>
+                          {followError ? <div className="exploreCreatorError">{followError}</div> : null}
+                        </div>
+                      );
+                    })}
+                  </section>
+                ))}
               </div>
             )}
 

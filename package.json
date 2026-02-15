@@ -41,6 +41,6 @@
     ]
   },
   "devDependencies": {
-    "supabase": "^2.75.1"
+    "supabase": "^2.76.8"
   }
 }

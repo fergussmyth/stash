@@ -64,6 +64,10 @@ const IMAGE_MAX_RATIO = 2.2;
 const IMAGE_MIN_BYTES = 25_000;
 const COVER_PRIORITY: Record<string, number> = {
   gradient: 1,
+  wikimedia: 2,
+  wikipedia_summary: 2,
+  loremflickr: 2,
+  picsum_seeded: 2,
   unsplash: 2,
   wikipedia: 2,
   og: 3,
@@ -98,6 +102,18 @@ function toAbsoluteUrl(value: string, base: string): string {
   } catch {
     return "";
   }
+}
+
+function uniqueNonEmpty(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }
 
 function normalizeQueryText(input: string): string[] {
@@ -225,12 +241,182 @@ export async function extractOgImage(pageUrl: string): Promise<string | null> {
 }
 
 export function buildCoverQuery(name: string, type: string): string {
+  return buildCoverQueryCandidates(name, type)[0] || "abstract texture";
+}
+
+function buildCoverQueryCandidates(name: string, type: string): string[] {
   const normalizedType = String(type || "").trim().toLowerCase();
   const typeHints = CATEGORY_HINTS[normalizedType] || [];
   const tokens = normalizeQueryText([name, ...typeHints].join(" "));
   const expanded = expandKeywords(tokens);
-  if (!expanded.length) return "abstract texture";
-  return expanded.slice(0, 7).join(" ");
+  if (!expanded.length) return ["abstract texture"];
+
+  const first = expanded[0] || "";
+  const second = expanded[1] || "";
+  const third = expanded[2] || "";
+  const hint = typeHints[0] || "";
+
+  return uniqueNonEmpty(
+    [
+      expanded.slice(0, 7).join(" "),
+      first,
+      [first, second].filter(Boolean).join(" "),
+      [first, third].filter(Boolean).join(" "),
+      [first, hint].filter(Boolean).join(" "),
+      [first, second, hint].filter(Boolean).join(" "),
+      expanded.slice(0, 3).join(" "),
+    ].slice(0, 7)
+  );
+}
+
+function isLikelyHttpImage(value: string): boolean {
+  return /^https?:\/\//i.test(String(value || "").trim());
+}
+
+function isLikelyRasterMime(value: string): boolean {
+  const normalized = String(value || "").toLowerCase();
+  if (!normalized.startsWith("image/")) return false;
+  if (normalized.includes("svg")) return false;
+  return true;
+}
+
+function buildTopicFallbackImageUrl(query: string, seed: string): {
+  coverImageUrl: string;
+  coverImageSource: string;
+} {
+  const tags = String(query || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z0-9-]/g, "").trim())
+    .filter((word) => word.length > 1)
+    .slice(0, 3)
+    .join(",");
+  const lock = Math.max(1, hashSeed(`${seed}:${query}`) % 100_000);
+
+  if (tags) {
+    return {
+      coverImageUrl: `https://loremflickr.com/1600/900/${tags}?lock=${lock}`,
+      coverImageSource: "loremflickr",
+    };
+  }
+
+  const fallbackSeed = encodeURIComponent(String(seed || "stash").slice(0, 80));
+  return {
+    coverImageUrl: `https://picsum.photos/seed/${fallbackSeed}/1600/900`,
+    coverImageSource: "picsum_seeded",
+  };
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number
+): Promise<{ ok: true; data: unknown } | { ok: false }> {
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+      },
+      timeoutMs
+    );
+    if (!response.ok) return { ok: false };
+    return { ok: true, data: await response.json() };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function getWikipediaSearchTitles(query: string): Promise<string[]> {
+  const trimmed = String(query || "").trim();
+  if (!trimmed) return [];
+  const url =
+    "https://en.wikipedia.org/w/api.php" +
+    "?action=opensearch&namespace=0&limit=5&format=json" +
+    `&search=${encodeURIComponent(trimmed)}`;
+  const payload = await fetchJsonWithTimeout(url, 6000);
+  if (!payload.ok) return [];
+  const rows = Array.isArray(payload.data) ? payload.data : [];
+  const titles = Array.isArray(rows[1]) ? rows[1] : [];
+  return uniqueNonEmpty(titles.map((entry) => String(entry || "").trim()));
+}
+
+function toWikipediaSummaryTitle(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
+
+async function getWikipediaSummaryCoverByTitle(title: string): Promise<string | null> {
+  const normalizedTitle = toWikipediaSummaryTitle(title);
+  if (!normalizedTitle) return null;
+
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(normalizedTitle)}`;
+  const payload = await fetchJsonWithTimeout(url, 6000);
+  if (!payload.ok) return null;
+
+  const summary = payload.data as Record<string, unknown>;
+  const originalImage = summary?.originalimage as Record<string, unknown> | undefined;
+  const thumbnail = summary?.thumbnail as Record<string, unknown> | undefined;
+  const imageUrl = String(originalImage?.source || thumbnail?.source || "").trim();
+  if (!isLikelyHttpImage(imageUrl)) return null;
+  return imageUrl;
+}
+
+async function getWikipediaSummaryCover(query: string): Promise<string | null> {
+  const titles = await getWikipediaSearchTitles(query);
+  const fallbackTitles = uniqueNonEmpty([query, ...titles]).slice(0, 2);
+  for (const title of fallbackTitles) {
+    const image = await getWikipediaSummaryCoverByTitle(title);
+    if (image) return image;
+  }
+  return null;
+}
+
+async function getWikimediaCommonsCover(query: string): Promise<string | null> {
+  const trimmed = String(query || "").trim();
+  if (!trimmed) return null;
+
+  const url =
+    "https://commons.wikimedia.org/w/api.php" +
+    "?action=query&format=json&formatversion=2" +
+    "&generator=search&gsrnamespace=6&gsrlimit=8" +
+    "&prop=imageinfo&iiprop=url|size|mime&iiurlwidth=1600&iiurlheight=900" +
+    `&gsrsearch=${encodeURIComponent(trimmed)}`;
+  const payload = await fetchJsonWithTimeout(url, 7000);
+  if (!payload.ok) return null;
+
+  const data = payload.data as Record<string, unknown>;
+  const queryData = data?.query as Record<string, unknown> | undefined;
+  const pages = Array.isArray(queryData?.pages) ? queryData?.pages : [];
+  const fallbackCandidates: string[] = [];
+
+  for (const page of pages) {
+    const row = page as Record<string, unknown>;
+    const imageInfos = Array.isArray(row?.imageinfo) ? row.imageinfo : [];
+    const imageInfo = imageInfos[0] as Record<string, unknown> | undefined;
+    if (!imageInfo) continue;
+
+    const mime = String(imageInfo?.mime || "").trim().toLowerCase();
+    if (mime && !isLikelyRasterMime(mime)) continue;
+
+    const candidateUrl = String(imageInfo?.thumburl || imageInfo?.url || "").trim();
+    if (!isLikelyHttpImage(candidateUrl)) continue;
+
+    const width = Number(imageInfo?.thumbwidth || imageInfo?.width || 0);
+    const height = Number(imageInfo?.thumbheight || imageInfo?.height || 0);
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      if (isImageRatioValid(width, height)) return candidateUrl;
+      fallbackCandidates.push(candidateUrl);
+      continue;
+    }
+
+    fallbackCandidates.push(candidateUrl);
+  }
+
+  return fallbackCandidates[0] || null;
 }
 
 export async function getUnsplashCover(query: string): Promise<string | null> {
@@ -278,13 +464,16 @@ export async function getWikipediaCover(query: string): Promise<string | null> {
     "&prop=pageimages&piprop=thumbnail&pithumbsize=1280" +
     `&gsrsearch=${encodeURIComponent(trimmed)}`;
   try {
-    const response = await fetchWithTimeout(url, { method: "GET" }, 6000);
-    if (!response.ok) return null;
-    const data = await response.json();
-    const pages = Array.isArray(data?.query?.pages) ? data.query.pages : [];
+    const payload = await fetchJsonWithTimeout(url, 6000);
+    if (!payload.ok) return null;
+    const data = payload.data as Record<string, unknown>;
+    const queryData = data.query as Record<string, unknown> | undefined;
+    const pages = Array.isArray(queryData?.pages) ? queryData.pages : [];
     for (const page of pages) {
-      const imageUrl = String(page?.thumbnail?.source || "").trim();
-      if (/^https?:\/\//i.test(imageUrl)) {
+      const row = page as Record<string, unknown>;
+      const thumbnail = row.thumbnail as Record<string, unknown> | undefined;
+      const imageUrl = String(thumbnail?.source || "").trim();
+      if (isLikelyHttpImage(imageUrl)) {
         return imageUrl;
       }
     }
@@ -337,15 +526,37 @@ export async function pickCoverForCollection({
     }
   }
 
-  const query = buildCoverQuery(name, type);
-  const unsplashUrl = await getUnsplashCover(query);
+  const queryCandidates = buildCoverQueryCandidates(name, type).slice(0, 3);
+
+  for (const query of queryCandidates) {
+    const wikimediaUrl = await getWikimediaCommonsCover(query);
+    if (wikimediaUrl) {
+      return { coverImageUrl: wikimediaUrl, coverImageSource: "wikimedia" };
+    }
+  }
+
+  for (const query of queryCandidates) {
+    const wikipediaSummaryUrl = await getWikipediaSummaryCover(query);
+    if (wikipediaSummaryUrl) {
+      return { coverImageUrl: wikipediaSummaryUrl, coverImageSource: "wikipedia_summary" };
+    }
+  }
+
+  const unsplashUrl = await getUnsplashCover(queryCandidates[0] || buildCoverQuery(name, type));
   if (unsplashUrl) {
     return { coverImageUrl: unsplashUrl, coverImageSource: "unsplash" };
   }
 
-  const wikipediaUrl = await getWikipediaCover(query);
-  if (wikipediaUrl) {
-    return { coverImageUrl: wikipediaUrl, coverImageSource: "wikipedia" };
+  for (const query of queryCandidates) {
+    const wikipediaUrl = await getWikipediaCover(query);
+    if (wikipediaUrl) {
+      return { coverImageUrl: wikipediaUrl, coverImageSource: "wikipedia" };
+    }
+  }
+
+  const topicFallback = buildTopicFallbackImageUrl(queryCandidates[0] || name, seed);
+  if (topicFallback.coverImageUrl) {
+    return topicFallback;
   }
 
   return { coverImageUrl: makeGradientCover(seed), coverImageSource: "gradient" };
