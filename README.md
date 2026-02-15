@@ -3,7 +3,7 @@
 A clean way to save links while you browse.
 
 
-![showcase](image-1.png)
+![showcase](docs/assets/app-showcase.png)
 
 ## What it does
 - Save Airbnb links from pasted text (including short/slink URLs) or the browser extension.
@@ -16,7 +16,7 @@ A clean way to save links while you browse.
 ## Chrome extension (start here)
 Stash lives in the browser so you can save a page the moment you see it.
 
-![extension showcase](image.png)
+![extension showcase](docs/assets/extension-showcase.png)
 
 ## Run locally
 From the project root:
@@ -58,6 +58,27 @@ supabase secrets set UNSPLASH_ACCESS_KEY=your_unsplash_access_key
 ```
 
 Automatic cover generation works without Unsplash by using Wikimedia/Wikipedia lookups, then query-based fallback image providers, and only then gradients.
+
+## Project structure
+```text
+.
+├─ src/                 # React web app source
+│  ├─ components/
+│  ├─ hooks/
+│  ├─ lib/
+│  └─ pages/
+├─ public/              # Static web assets
+├─ server/              # Local API server + social services
+├─ supabase/
+│  ├─ functions/        # Edge functions
+│  └─ ...
+├─ extension/           # Browser extension source
+├─ migrations/          # SQL migrations
+├─ docs/
+│  ├─ assets/           # README/media assets
+│  └─ screenshots/
+└─ README.md
+```
 
 ## Short roadmap
 - Better parsing of TikTok comments and other short-link formats.

@@ -220,7 +220,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [autoRedirect, setAutoRedirect] = useState(false);
-  const [hasAttempted, setHasAttempted] = useState(false);
+  const [, setHasAttempted] = useState(false);
 
   // Trips UI
   const [selectedTripId, setSelectedTripId] = useState("");
@@ -228,8 +228,7 @@ export default function Home() {
   const [savedMsg, setSavedMsg] = useState("");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
-  const [linksFound, setLinksFound] = useState(0);
-  const [lastSavedTripId, setLastSavedTripId] = useState("");
+  const [, setLinksFound] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingCreateRef = useRef(false);
   const [autoExtractPending, setAutoExtractPending] = useState(false);
@@ -742,20 +741,6 @@ export default function Home() {
     setTimeout(() => setToastMsg(""), 1800);
   }
 
-  function resetAll() {
-    setComment("");
-    setLink("");
-    setLinkMeta(null);
-    setError("");
-    setWarning("");
-    setHasAttempted(false);
-    setSavedMsg("");
-    setBulkLinks([]);
-    setSelectedIds(new Set());
-    setLinksFound(0);
-    setLastSavedTripId("");
-  }
-
   function clearSinglePreview() {
     setLink("");
     setLinkMeta(null);
@@ -878,7 +863,6 @@ export default function Home() {
     setSelectedIds(new Set());
     setLinkMeta(null);
     setLinksFound(0);
-    setLastSavedTripId("");
 
     // Find ALL links in the pasted text
     const matches = extractLinksFromText(comment);
@@ -1185,7 +1169,6 @@ export default function Home() {
                       }
                       if (!targetId) return;
                       if (link) {
-                        setLastSavedTripId(targetId);
                         await saveSingleToTrip(targetId);
                       } else {
                         saveBulkToTrip(targetId);

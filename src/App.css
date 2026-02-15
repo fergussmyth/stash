@@ -6331,6 +6331,22 @@ h1 span {
   justify-content: space-between;
 }
 
+.detailAddLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.detailAddLinkInput {
+  flex: 1;
+  min-width: 260px;
+}
+
+.detailAddLinkBtn {
+  white-space: nowrap;
+}
+
 .searchWrap {
   display: flex;
   align-items: center;

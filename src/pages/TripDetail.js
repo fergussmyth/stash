@@ -11,69 +11,6 @@ import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import Dropdown from "../components/Dropdown";
 import stashLogo from "../assets/icons/stash-favicon.png";
-import userIcon from "../assets/icons/user.png";
-
-function IconList(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconCompare(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <rect x="3" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
-      <rect x="13" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function IconExternal(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M14 4h6v6M10 14l10-10M5 9v10h10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconCopy(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <rect x="9" y="9" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
-      <rect x="4" y="4" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function IconTrash(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function IconNote(props) {
   return (
@@ -177,6 +114,38 @@ function decodeHtmlEntities(text = "") {
   return el.value;
 }
 
+async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2600) {
+  async function postJsonWithTimeout(path, body, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      return await response.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  try {
+    const data = await postJsonWithTimeout(endpoint, { url }, timeoutMs);
+    const title = String(data?.title || "").trim();
+    if (title) return title;
+
+    const previewData = await postJsonWithTimeout("/fetch-link-preview", { url }, timeoutMs + 1800);
+    const previewTitle = String(previewData?.title || "").trim();
+    return previewTitle || null;
+  } catch {
+    return null;
+  }
+}
+
 function getCollectionLabel(type) {
   if (type === "fashion") return "Fashion list";
   if (type === "travel") return "Shortlist";
@@ -196,6 +165,20 @@ function getDomain(url) {
   } catch {
     return "";
   }
+}
+
+function normalizeUrl(input = "") {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(?:\/|$)/i.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function getPlatform(domain = "") {
+  if (!domain) return "";
+  if (domain.includes("airbnb.")) return "airbnb";
+  return "";
 }
 
 function normalizeText(value = "") {
@@ -502,6 +485,7 @@ export default function TripDetail() {
     updateTripState,
     enableShare,
     toggleItemPinned,
+    addItemToTrip,
     user,
     loading,
   } = useTrips();
@@ -539,6 +523,8 @@ export default function TripDetail() {
   const [pickWinnerSelection, setPickWinnerSelection] = useState("");
   const [ruledOutOpen, setRuledOutOpen] = useState(false);
   const [alternativesOpen, setAlternativesOpen] = useState(false);
+  const [addLinkInput, setAddLinkInput] = useState("");
+  const [addLinkLoading, setAddLinkLoading] = useState(false);
   const decisionScrollRef = useRef(null);
   const autoPickRef = useRef({ count: null });
 
@@ -755,7 +741,7 @@ export default function TripDetail() {
 
   const decisionStatus = trip?.decisionStatus || "none";
   const decisionDismissed = !!trip?.decisionDismissed;
-  const decisionItems = trip?.items || [];
+  const decisionItems = useMemo(() => trip?.items || [], [trip?.items]);
   const decisionActiveItems = useMemo(
     () =>
       decisionItems.filter(
@@ -995,17 +981,6 @@ export default function TripDetail() {
     setMentionFilter("");
   }
 
-  function handleSegmentKey(event) {
-    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-    const buttons = Array.from(event.currentTarget.querySelectorAll("button[role=\"tab\"]"));
-    const currentIndex = buttons.indexOf(event.target);
-    if (currentIndex === -1) return;
-    const delta = event.key === "ArrowRight" ? 1 : -1;
-    const nextIndex = (currentIndex + delta + buttons.length) % buttons.length;
-    buttons[nextIndex].focus();
-    buttons[nextIndex].click();
-  }
-
   function renderNoteArea(item) {
     const noteValue = item.note || "";
     const isExpanded = expandedNotes.has(item.id);
@@ -1036,6 +1011,70 @@ export default function TripDetail() {
 
   function clearCompareSelection() {
     setCompareSelected(new Set());
+  }
+
+  async function handleAddLinkToCollection() {
+    if (!trip?.id || addLinkLoading) return;
+    const normalizedInput = normalizeUrl(addLinkInput);
+    if (!normalizedInput) {
+      setInlineErrorMessage("Paste a URL first.");
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(normalizedInput);
+    } catch {
+      setInlineErrorMessage("That doesn’t look like a valid URL.");
+      return;
+    }
+
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      setInlineErrorMessage("Only http/https URLs are supported.");
+      return;
+    }
+
+    const url = parsed.toString();
+    const normalizedIncoming = cleanAirbnbUrl(url);
+    const exists = (trip.items || []).some(
+      (item) => cleanAirbnbUrl(item?.url || item?.airbnbUrl || "") === normalizedIncoming
+    );
+    if (exists) {
+      setInlineErrorMessage("That link is already in this collection.");
+      return;
+    }
+
+    const domain = getDomain(url);
+    const endpoint = domain.includes("airbnb.") ? "/fetch-airbnb-title" : "/fetch-title";
+    const fallbackTitle = fallbackTitleForUrl(url);
+
+    setAddLinkLoading(true);
+    try {
+      const fetchedTitle = await fetchTitleWithTimeout(endpoint, url, 2600);
+      const decodedTitle = decodeHtmlEntities(fetchedTitle || "").trim();
+      const title = decodedTitle || fallbackTitle;
+      const insertedItem = await addItemToTrip(trip.id, {
+        title,
+        url,
+        airbnbUrl: url,
+        originalUrl: url,
+        domain,
+        platform: getPlatform(domain),
+        itemType: "link",
+        metadata: {},
+        addedAt: Date.now(),
+      });
+      if (!insertedItem) {
+        setInlineErrorMessage("Couldn’t add that link right now.");
+        return;
+      }
+      setAddLinkInput("");
+      setInlineToastMessage("Link added.");
+    } catch {
+      setInlineErrorMessage("Couldn’t add that link right now.");
+    } finally {
+      setAddLinkLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -1446,29 +1485,6 @@ export default function TripDetail() {
       await navigator.clipboard.writeText(itemShare.airbnbUrl);
       setItemShareMsg("Copied!");
       setTimeout(() => setItemShareMsg(""), 1500);
-    }
-  }
-
-  async function handleCopyItemUrl(item) {
-    if (!item?.airbnbUrl) return;
-    try {
-      await navigator.clipboard.writeText(item.airbnbUrl);
-    } catch {
-      setInlineErrorMessage("Couldn’t copy link. Try again.");
-    }
-  }
-
-  async function handleSystemShare() {
-    if (!shareUrlFinal || !navigator.share) return;
-    try {
-      await navigator.share({
-        title: trip?.name,
-        text: `${trip?.name || "Collection"} ${collectionShareLabel}`,
-        url: shareUrlFinal,
-      });
-      setShareOpen(false);
-    } catch {
-      // keep modal open if cancelled
     }
   }
 
@@ -1887,6 +1903,32 @@ export default function TripDetail() {
               </div>
 
               <div className="toolbarRight" />
+            </div>
+
+            <div className="detailAddLinkRow">
+              <input
+                className="input detailAddLinkInput"
+                type="url"
+                placeholder="Paste a link to add directly to this collection"
+                value={addLinkInput}
+                onChange={(e) => setAddLinkInput(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleAddLinkToCollection();
+                  }
+                }}
+                disabled={addLinkLoading}
+                aria-label="Add link to collection"
+              />
+              <button
+                className="miniBtn detailAddLinkBtn"
+                type="button"
+                onClick={handleAddLinkToCollection}
+                disabled={addLinkLoading}
+              >
+                {addLinkLoading ? "Adding…" : "Add link"}
+              </button>
             </div>
 
             <div className="filterRow">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../hooks/useAuth";
@@ -52,15 +52,20 @@ export default function ProfileSettings() {
   const outputSize = 512;
   const rememberMeEnabled =
     typeof window !== "undefined" && window.localStorage.getItem("stashRememberMe") === "true";
-
-  function makeShareId(length = 12) {
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let out = "";
-    for (let i = 0; i < length; i += 1) {
-      out += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return out;
-  }
+  const clampCropOffset = useCallback(
+    (nextOffset, zoomValue) => {
+      const { w, h } = cropNatural;
+      if (!w || !h) return nextOffset;
+      const scale = Number.isFinite(zoomValue) ? zoomValue : 1;
+      const maxX = Math.max(0, Math.abs(w * scale - cropFrameSize) / 2);
+      const maxY = Math.max(0, Math.abs(h * scale - cropFrameSize) / 2);
+      return {
+        x: Math.max(-maxX, Math.min(maxX, nextOffset.x)),
+        y: Math.max(-maxY, Math.min(maxY, nextOffset.y)),
+      };
+    },
+    [cropFrameSize, cropNatural]
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -119,7 +124,7 @@ export default function ProfileSettings() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [isCropping, cropNatural.w, cropNatural.h]);
+  }, [isCropping, cropNatural.w, cropNatural.h, clampCropOffset]);
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -176,18 +181,6 @@ export default function ProfileSettings() {
       setShowAvatarMenu(false);
     };
     reader.readAsDataURL(file);
-  }
-
-  function clampCropOffset(nextOffset, zoomValue = cropZoom) {
-    const { w, h } = cropNatural;
-    if (!w || !h) return nextOffset;
-    const scale = zoomValue;
-    const maxX = Math.max(0, Math.abs(w * scale - cropFrameSize) / 2);
-    const maxY = Math.max(0, Math.abs(h * scale - cropFrameSize) / 2);
-    return {
-      x: Math.max(-maxX, Math.min(maxX, nextOffset.x)),
-      y: Math.max(-maxY, Math.min(maxY, nextOffset.y)),
-    };
   }
 
   async function handleCropSave() {
@@ -381,24 +374,6 @@ export default function ProfileSettings() {
     await deleteTrip(trip.id);
     setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
     setToastMsg("Deleted");
-    setTimeout(() => setToastMsg(""), 1500);
-  }
-
-  async function handleRegenerateShare(trip) {
-    const nextShareId = makeShareId(12);
-    const { error } = await supabase
-      .from("trips")
-      .update({ is_shared: true, share_id: nextShareId })
-      .eq("id", trip.id)
-      .eq("owner_id", user.id);
-    if (error) {
-      setStatus("Could not regenerate link.");
-      return;
-    }
-    setSharedTrips((prev) =>
-      prev.map((t) => (t.id === trip.id ? { ...t, share_id: nextShareId, is_shared: true } : t))
-    );
-    setToastMsg("Link regenerated");
     setTimeout(() => setToastMsg(""), 1500);
   }
 
@@ -700,7 +675,7 @@ export default function ProfileSettings() {
                         x: startOffset.x + (event.clientX - startX),
                         y: startOffset.y + (event.clientY - startY),
                       };
-                      setCropOffset(clampCropOffset(nextOffset));
+                      setCropOffset(clampCropOffset(nextOffset, cropZoom));
                     }}
                     onPointerUp={() => {
                       dragStateRef.current = null;

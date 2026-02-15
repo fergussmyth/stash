@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTrips } from "../hooks/useTrips";
 import { supabase } from "../lib/supabaseClient";
@@ -34,7 +34,7 @@ export default function Review() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState("newest");
 
-  async function trackEvent(eventName, payload = {}) {
+  const trackEvent = useCallback(async (eventName, payload = {}) => {
     const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
     if (!supabaseUrl) return;
     const { data: sessionData } = await supabase.auth.getSession();
@@ -52,14 +52,13 @@ export default function Review() {
     } catch {
       // ignore
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (user) {
       trackEvent("review_page_opened");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, trackEvent]);
 
   const items = useMemo(() => {
     const all = [];
@@ -98,6 +97,24 @@ export default function Review() {
     });
   }, [items]);
 
+  const handleFocusGroup = useCallback(
+    (group) => {
+      const tripId = group.items[0]?.tripId;
+      if (!tripId) return;
+      trackEvent("review_item_clicked", { decisionGroupId: group.id, collectionId: tripId });
+      navigate(`/trips/${tripId}?focusGroup=${group.id}`);
+    },
+    [navigate, trackEvent]
+  );
+
+  const handleFocusItem = useCallback(
+    (item) => {
+      trackEvent("review_item_clicked", { linkId: item.id, collectionId: item.tripId });
+      navigate(`/trips/${item.tripId}`);
+    },
+    [navigate, trackEvent]
+  );
+
   const decisions = useMemo(() => {
     const entries = [];
     for (const group of comparisons) {
@@ -135,7 +152,7 @@ export default function Review() {
       });
     }
     return entries;
-  }, [comparisons, shortlisted, stalled]);
+  }, [comparisons, shortlisted, stalled, handleFocusGroup, handleFocusItem]);
 
   const filteredDecisions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -162,18 +179,6 @@ export default function Review() {
       }, {}),
     [trips]
   );
-
-  function handleFocusGroup(group) {
-    const tripId = group.items[0]?.tripId;
-    if (!tripId) return;
-    trackEvent("review_item_clicked", { decisionGroupId: group.id, collectionId: tripId });
-    navigate(`/trips/${tripId}?focusGroup=${group.id}`);
-  }
-
-  function handleFocusItem(item) {
-    trackEvent("review_item_clicked", { linkId: item.id, collectionId: item.tripId });
-    navigate(`/trips/${item.tripId}`);
-  }
 
   const hasDecisions = decisions.length > 0;
 

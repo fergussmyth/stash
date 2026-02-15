@@ -300,13 +300,15 @@ export function TripsProvider({ children }) {
   }
 
   async function addItemToTrip(tripId, item) {
-    if (!user) return;
+    if (!user) return null;
     const existingTrip = tripsById.get(tripId);
-    if (!existingTrip) return;
+    if (!existingTrip) return null;
+    const hadItemsBeforeAdd = (existingTrip.items || []).length > 0;
+    const hadCoverBeforeAdd = !!String(existingTrip.coverImageUrl || "").trim();
     const incomingUrl = item.url || item.airbnbUrl;
-    if (!incomingUrl) return;
+    if (!incomingUrl) return null;
     const exists = existingTrip.items.some((i) => (i.url || i.airbnbUrl) === incomingUrl);
-    if (exists) return;
+    if (exists) return null;
 
     const { data, error } = await supabase
       .from("trip_items")
@@ -333,7 +335,7 @@ export function TripsProvider({ children }) {
     if (error) {
       // eslint-disable-next-line no-console
       console.error("Failed to add item:", error.message);
-      return;
+      return null;
     }
 
     const mapped = {
@@ -369,8 +371,11 @@ export function TripsProvider({ children }) {
       prev.map((t) => (t.id === tripId ? { ...t, items: [mapped, ...t.items] } : t))
     );
 
-    void refreshTripCoverWithRetry(tripId, { force: true, maxAttempts: 2 });
+    if (hadItemsBeforeAdd || !hadCoverBeforeAdd) {
+      void refreshTripCoverWithRetry(tripId, { force: true, maxAttempts: 2 });
+    }
     void triggerDecisionUpdates(tripId);
+    return mapped;
   }
 
   async function refreshTripCover(tripId, { force = false } = {}) {

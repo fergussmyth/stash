@@ -2,34 +2,6 @@ import { Link, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-function humanizeSlugTitle(pathname = "", hostname = "") {
-  const cleanPath = (pathname || "").replace(/\/+$/, "");
-  if (!cleanPath || cleanPath === "/") return hostname.replace(/^www\./, "");
-  const parts = cleanPath.split("/").filter(Boolean);
-  let slug = parts[parts.length - 1] || "";
-  const prdIndex = parts.findIndex((p) => p.toLowerCase() === "prd");
-  if (prdIndex > 0) {
-    slug = parts[prdIndex - 1] || slug;
-  }
-  if (/^\d+$/.test(slug)) return hostname.replace(/^www\./, "");
-  const words = slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!words) return hostname.replace(/^www\./, "");
-  return words.replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function fallbackTitleForUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("airbnb.")) {
-      const match = url?.match(/\/rooms\/(\d+)/i);
-      return match ? `Airbnb room ${match[1]}` : "Airbnb room";
-    }
-    return humanizeSlugTitle(parsed.pathname, parsed.hostname);
-  } catch {
-    return "Saved link";
-  }
-}
-
 function getDomain(url) {
   try {
     const parsed = new URL(url);
@@ -37,16 +9,6 @@ function getDomain(url) {
   } catch {
     return "";
   }
-}
-
-function buildMetadataChips(metadata = {}) {
-  const chips = [];
-  if (metadata.rating != null) chips.push(`⭐ ${metadata.rating}`);
-  if (metadata.beds != null) chips.push(`${metadata.beds} beds`);
-  if (metadata.bedrooms != null) chips.push(`${metadata.bedrooms} bedrooms`);
-  if (metadata.bathrooms != null) chips.push(`${metadata.bathrooms} bathrooms`);
-  if (metadata.guests != null) chips.push(`${metadata.guests} guests`);
-  return chips;
 }
 
 function formatSharedBy(displayName) {
@@ -60,38 +22,6 @@ function titleCase(input = "") {
     .split(/\s+/)
     .map((word) => (word ? word[0].toUpperCase() + word.slice(1).toLowerCase() : ""))
     .join(" ");
-}
-
-function decodeHtmlEntities(text = "") {
-  if (!text) return "";
-  if (typeof document === "undefined") return text;
-  const el = document.createElement("textarea");
-  el.innerHTML = text;
-  return el.value;
-}
-
-function splitTitleParts(title, fallbackUrl) {
-  const base = decodeHtmlEntities((title || "").trim()) || fallbackTitleForUrl(fallbackUrl);
-  const parts = base.split(/\s*[•·]\s*/);
-  if (parts.length <= 1) {
-    return { main: base, meta: [] };
-  }
-  return { main: parts[0], meta: parts.slice(1) };
-}
-
-function splitMetaParts(parts = []) {
-  let rating = "";
-  const chips = [];
-  for (const part of parts) {
-    const trimmed = (part || "").trim();
-    if (!trimmed) continue;
-    if (!rating && /^[⭐★]\s*\d/.test(trimmed)) {
-      rating = trimmed.replace(/^[⭐★]\s*/, "");
-      continue;
-    }
-    chips.push(trimmed);
-  }
-  return { rating, chips };
 }
 
 export default function ShareTrip() {
