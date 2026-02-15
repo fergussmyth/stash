@@ -6,7 +6,7 @@ import { useTrips } from "../hooks/useTrips";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
-import PublicListCard from "../components/PublicListCard";
+import PublicListCard from "../components/PublicListCard.js";
 import { hydrateListPreviewImages } from "../lib/socialDiscovery";
 import { getPublicCollectionsByHandle } from "../lib/publishedCollections";
 import stashLogo from "../assets/icons/stash-favicon.png";
