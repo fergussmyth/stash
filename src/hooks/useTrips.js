@@ -1,10 +1,12 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, startTransition } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "./useAuth";
 
 const STORAGE_KEY = "airbnb_trip_shortlists_v1";
 const TripsContext = createContext(null);
 const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
+const inFlightTripLoads = new Map();
+const COVER_REFRESH_RETRY_DELAY_MS = 800;
 
 function normalizeCategory(input = "") {
   const normalized = String(input || "").trim().toLowerCase();
@@ -62,118 +64,161 @@ export function TripsProvider({ children }) {
   }, [trips]);
 
   async function loadTrips() {
-    if (!user) {
-      setTrips([]);
+    const userId = user?.id;
+    if (!userId) {
+      startTransition(() => {
+        setTrips([]);
+      });
       return;
     }
     setLoading(true);
 
-    let { data: tripsData, error: tripsError } = await supabase
-      .from("trips")
-      .select("*")
-      .eq("owner_id", user.id)
-      .order("created_at", { ascending: false });
+    let loadPromise = inFlightTripLoads.get(userId);
 
-    if (tripsError) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load trips:", tripsError.message);
-      const retry = await supabase
-        .from("trips")
-        .select("*")
-        .eq("owner_id", user.id)
-        .order("created_at", { ascending: false });
-      if (retry.error) {
-        // eslint-disable-next-line no-console
-        console.error("Retry load trips failed:", retry.error.message);
-        setTrips([]);
-        setLoading(false);
-        return;
-      }
-      tripsData = retry.data;
-      tripsError = null;
-    }
+    if (!loadPromise) {
+      loadPromise = (async () => {
+        let { data: tripsData, error: tripsError } = await supabase
+          .from("trips")
+          .select("*")
+          .eq("owner_id", userId)
+          .order("created_at", { ascending: false });
 
-    const tripIds = tripsData.map((t) => t.id);
-    let itemsData = [];
+        if (tripsError) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to load trips:", tripsError.message);
+          const retry = await supabase
+            .from("trips")
+            .select("*")
+            .eq("owner_id", userId)
+            .order("created_at", { ascending: false });
+          if (retry.error) {
+            // eslint-disable-next-line no-console
+            console.error("Retry load trips failed:", retry.error.message);
+            return [];
+          }
+          tripsData = retry.data || [];
+          tripsError = null;
+        }
 
-    if (tripIds.length > 0) {
-      const { data: items, error: itemsError } = await supabase
-        .from("trip_items")
-        .select("*")
-        .in("trip_id", tripIds)
-        .order("added_at", { ascending: false });
+        const tripRows = Array.isArray(tripsData) ? tripsData : [];
+        const tripIds = tripRows.map((t) => t.id);
+        let itemsData = [];
 
-      if (itemsError) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to load items:", itemsError.message);
-      } else {
-        itemsData = items || [];
-      }
-    }
+        if (tripIds.length > 0) {
+          const { data: items, error: itemsError } = await supabase
+            .from("trip_items")
+            .select("*")
+            .in("trip_id", tripIds)
+            .order("added_at", { ascending: false });
 
-    const itemsByTrip = new Map();
-    for (const item of itemsData) {
-      const list = itemsByTrip.get(item.trip_id) || [];
-      list.push({
-        id: item.id,
-        url: item.url,
-        airbnbUrl: item.url,
-        originalUrl: item.original_url,
-        domain: item.domain,
-        platform: item.platform,
-        itemType: item.item_type,
-        imageUrl: item.image_url,
-        faviconUrl: item.favicon_url,
-        metadata: item.metadata || {},
-        pinned: !!item.pinned,
-        archived: !!item.archived,
-        title: item.title,
-        note: item.note,
-        sourceText: item.source_text,
-        openCount: item.open_count ?? 0,
-        lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
-        decisionGroupId: item.decision_group_id || null,
-        chosen: !!item.chosen,
-        decisionState: item.decision_state || "active",
-        ruledOutAt: item.ruled_out_at ? new Date(item.ruled_out_at).getTime() : 0,
-        chosenAt: item.chosen_at ? new Date(item.chosen_at).getTime() : 0,
-        primaryAction: item.primary_action || null,
-        shortlisted: !!item.shortlisted,
-        dismissed: !!item.dismissed,
-        addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
+          if (itemsError) {
+            // eslint-disable-next-line no-console
+            console.error("Failed to load items:", itemsError.message);
+          } else {
+            itemsData = items || [];
+          }
+        }
+
+        const itemsByTrip = new Map();
+        for (const item of itemsData) {
+          const list = itemsByTrip.get(item.trip_id) || [];
+          list.push({
+            id: item.id,
+            url: item.url,
+            airbnbUrl: item.url,
+            originalUrl: item.original_url,
+            domain: item.domain,
+            platform: item.platform,
+            itemType: item.item_type,
+            imageUrl: item.image_url,
+            faviconUrl: item.favicon_url,
+            metadata: item.metadata || {},
+            pinned: !!item.pinned,
+            archived: !!item.archived,
+            title: item.title,
+            note: item.note,
+            sourceText: item.source_text,
+            openCount: item.open_count ?? 0,
+            lastOpenedAt: item.last_opened_at ? new Date(item.last_opened_at).getTime() : 0,
+            decisionGroupId: item.decision_group_id || null,
+            chosen: !!item.chosen,
+            decisionState: item.decision_state || "active",
+            ruledOutAt: item.ruled_out_at ? new Date(item.ruled_out_at).getTime() : 0,
+            chosenAt: item.chosen_at ? new Date(item.chosen_at).getTime() : 0,
+            primaryAction: item.primary_action || null,
+            shortlisted: !!item.shortlisted,
+            dismissed: !!item.dismissed,
+            addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
+          });
+          itemsByTrip.set(item.trip_id, list);
+        }
+
+        return tripRows.map((t) => ({
+          id: t.id,
+          name: t.name,
+          type: normalizeCategory(t.type),
+          subtitle: t.subtitle || "",
+          visibility: t.visibility || "private",
+          publicSlug: t.public_slug || "",
+          publishedAt: t.published_at || null,
+          isRanked: !!t.is_ranked,
+          rankedSize: t.ranked_size ?? null,
+          saveCount: Number(t.save_count || 0),
+          viewCount: Number(t.view_count || 0),
+          pinned: !!t.pinned,
+          icon: t.icon || null,
+          color: t.color || null,
+          coverImageUrl: t.cover_image_url || "",
+          coverImageSource: t.cover_image_source || "",
+          coverUpdatedAt: t.cover_updated_at || null,
+          decisionStatus: t.decision_status || "none",
+          decidedAt: t.decided_at ? new Date(t.decided_at).getTime() : 0,
+          decisionDismissed: !!t.decision_dismissed,
+          createdAt: t.created_at,
+          items: itemsByTrip.get(t.id) || [],
+          shareId: t.share_id || "",
+          isShared: !!t.is_shared,
+          ownerDisplayName: "",
+        }));
+      })().finally(() => {
+        inFlightTripLoads.delete(userId);
       });
-      itemsByTrip.set(item.trip_id, list);
+
+      inFlightTripLoads.set(userId, loadPromise);
     }
 
-    const mapped = tripsData.map((t) => ({
-      id: t.id,
-      name: t.name,
-      type: normalizeCategory(t.type),
-      pinned: !!t.pinned,
-      icon: t.icon || null,
-      color: t.color || null,
-      coverImageUrl: t.cover_image_url || "",
-      coverImageSource: t.cover_image_source || "",
-      coverUpdatedAt: t.cover_updated_at || null,
-      decisionStatus: t.decision_status || "none",
-      decidedAt: t.decided_at ? new Date(t.decided_at).getTime() : 0,
-      decisionDismissed: !!t.decision_dismissed,
-      createdAt: t.created_at,
-      items: itemsByTrip.get(t.id) || [],
-      shareId: t.share_id || "",
-      isShared: !!t.is_shared,
-      ownerDisplayName: "",
-    }));
-
-    setTrips(mapped);
-    setLoading(false);
+    try {
+      const mapped = await loadPromise;
+      startTransition(() => {
+        setTrips(mapped);
+      });
+      const missingCoverTripIds = mapped
+        .filter((trip) => {
+          const hasCover = !!String(trip.coverImageUrl || "").trim();
+          const isGradientOnly = String(trip.coverImageSource || "").trim() === "gradient";
+          return !hasCover || isGradientOnly;
+        })
+        .map((trip) => trip.id)
+        .slice(0, 4);
+      for (const tripId of missingCoverTripIds) {
+        void refreshTripCoverWithRetry(tripId, { force: true, maxAttempts: 2 });
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to load trips:", error instanceof Error ? error.message : error);
+      startTransition(() => {
+        setTrips([]);
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     if (authLoading) return;
     loadTrips();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, authLoading]);
+  }, [user?.id, authLoading]);
 
   async function createTrip(name, type = "travel") {
     const trimmed = (name || "").trim();
@@ -197,6 +242,14 @@ export function TripsProvider({ children }) {
       id: data.id,
       name: data.name,
       type: normalizeCategory(data.type),
+      subtitle: data.subtitle || "",
+      visibility: data.visibility || "private",
+      publicSlug: data.public_slug || "",
+      publishedAt: data.published_at || null,
+      isRanked: !!data.is_ranked,
+      rankedSize: data.ranked_size ?? null,
+      saveCount: Number(data.save_count || 0),
+      viewCount: Number(data.view_count || 0),
       pinned: !!data.pinned,
       icon: data.icon || null,
       color: data.color || null,
@@ -212,7 +265,7 @@ export function TripsProvider({ children }) {
       isShared: !!data.is_shared,
     };
     setTrips((prev) => [trip, ...prev]);
-    void refreshTripCover(trip.id, { force: true });
+    void refreshTripCoverWithRetry(trip.id, { force: true, maxAttempts: 3 });
     return trip.id;
   }
 
@@ -231,6 +284,7 @@ export function TripsProvider({ children }) {
       return;
     }
     setTrips((prev) => prev.map((t) => (t.id === tripId ? { ...t, name: normalized } : t)));
+    void refreshTripCoverWithRetry(tripId, { force: true, maxAttempts: 3 });
   }
 
   async function deleteTrip(tripId) {
@@ -246,13 +300,15 @@ export function TripsProvider({ children }) {
   }
 
   async function addItemToTrip(tripId, item) {
-    if (!user) return;
+    if (!user) return null;
     const existingTrip = tripsById.get(tripId);
-    if (!existingTrip) return;
+    if (!existingTrip) return null;
+    const hadItemsBeforeAdd = (existingTrip.items || []).length > 0;
+    const hadCoverBeforeAdd = !!String(existingTrip.coverImageUrl || "").trim();
     const incomingUrl = item.url || item.airbnbUrl;
-    if (!incomingUrl) return;
+    if (!incomingUrl) return null;
     const exists = existingTrip.items.some((i) => (i.url || i.airbnbUrl) === incomingUrl);
-    if (exists) return;
+    if (exists) return null;
 
     const { data, error } = await supabase
       .from("trip_items")
@@ -279,7 +335,7 @@ export function TripsProvider({ children }) {
     if (error) {
       // eslint-disable-next-line no-console
       console.error("Failed to add item:", error.message);
-      return;
+      return null;
     }
 
     const mapped = {
@@ -315,30 +371,21 @@ export function TripsProvider({ children }) {
       prev.map((t) => (t.id === tripId ? { ...t, items: [mapped, ...t.items] } : t))
     );
 
-    void refreshTripCover(tripId, { force: true });
+    if (hadItemsBeforeAdd || !hadCoverBeforeAdd) {
+      void refreshTripCoverWithRetry(tripId, { force: true, maxAttempts: 2 });
+    }
     void triggerDecisionUpdates(tripId);
+    return mapped;
   }
 
   async function refreshTripCover(tripId, { force = false } = {}) {
-    if (!user) return;
-    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
-    if (!supabaseUrl) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) return;
+    if (!user || !tripId) return false;
 
     try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/collection-cover`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ collectionId: tripId, force }),
+      const { data: payload, error } = await supabase.functions.invoke("collection-cover", {
+        body: { collectionId: tripId, force },
       });
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (!payload?.coverImageUrl) return;
+      if (error || !payload?.coverImageUrl) return false;
       setTrips((prev) =>
         prev.map((t) =>
           t.id === tripId
@@ -351,9 +398,28 @@ export function TripsProvider({ children }) {
             : t
         )
       );
+      return true;
     } catch {
       // ignore cover refresh failures
+      return false;
     }
+  }
+
+  async function refreshTripCoverWithRetry(
+    tripId,
+    { force = false, maxAttempts = 2 } = {}
+  ) {
+    const attempts = Math.max(1, Number(maxAttempts) || 1);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const success = await refreshTripCover(tripId, { force });
+      if (success) return true;
+      if (attempt < attempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, COVER_REFRESH_RETRY_DELAY_MS * attempt)
+        );
+      }
+    }
+    return false;
   }
 
   async function reloadTripItems(tripId) {
@@ -397,9 +463,11 @@ export function TripsProvider({ children }) {
       addedAt: item.added_at ? new Date(item.added_at).getTime() : 0,
     }));
 
-    setTrips((prev) =>
-      prev.map((t) => (t.id === tripId ? { ...t, items: nextItems } : t))
-    );
+    startTransition(() => {
+      setTrips((prev) =>
+        prev.map((t) => (t.id === tripId ? { ...t, items: nextItems } : t))
+      );
+    });
   }
 
   async function triggerDecisionUpdates(tripId) {
@@ -555,6 +623,25 @@ export function TripsProvider({ children }) {
     );
   }
 
+  async function updateTripCategory(tripId, nextType) {
+    if (!user) return false;
+    const normalizedType = normalizeCategory(nextType);
+    const { error } = await supabase
+      .from("trips")
+      .update({ type: normalizedType })
+      .eq("id", tripId)
+      .eq("owner_id", user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to update collection section:", error.message);
+      return false;
+    }
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, type: normalizedType } : t))
+    );
+    return true;
+  }
+
   async function toggleItemPinned(tripId, itemId, nextPinned) {
     if (!user) return;
     const { error } = await supabase
@@ -650,8 +737,10 @@ export function TripsProvider({ children }) {
     enableShare,
     disableShare,
     toggleTripPinned,
+    updateTripCategory,
     toggleItemPinned,
     reloadTripItems,
+    reloadTrips: loadTrips,
     localImportAvailable,
     importLocalTrips,
   };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../hooks/useAuth";
@@ -7,60 +7,170 @@ import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import stashLogo from "../assets/icons/stash-favicon.png";
-import userIcon from "../assets/icons/user.png";
+import settingsIcon from "../assets/icons/settings.png";
+
+const SECTION_LABELS = {
+  general: "Ideas",
+  travel: "Travel",
+  fashion: "Fashion",
+};
+
+function makeFallbackGradient(seed) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const colors = ["#0f172a", "#1b2a4a", "#0b3b5e", "#1f2a44", "#21436d", "#103a3f"];
+  const pick = (offset) => colors[Math.abs(hash + offset) % colors.length];
+  return `linear-gradient(140deg, ${pick(0)} 0%, ${pick(2)} 55%, ${pick(4)} 100%)`;
+}
+
+function isGradientCover(value = "") {
+  const normalized = String(value || "").trim();
+  return normalized.startsWith("linear-gradient") || normalized.startsWith("radial-gradient");
+}
+
+function normalizeSection(section = "") {
+  const normalized = String(section || "").trim().toLowerCase();
+  if (normalized === "travel") return "travel";
+  if (normalized === "fashion") return "fashion";
+  return "general";
+}
+
+function formatRelativeTime(value) {
+  const timestamp = Date.parse(String(value || ""));
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "recently";
+
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+
+  if (diffMs < minute) return "just now";
+  if (diffMs < hour) {
+    const mins = Math.max(1, Math.round(diffMs / minute));
+    return `${mins}m ago`;
+  }
+  if (diffMs < day) {
+    const hours = Math.max(1, Math.round(diffMs / hour));
+    return `${hours}h ago`;
+  }
+  if (diffMs < week) {
+    const days = Math.max(1, Math.round(diffMs / day));
+    return `${days}d ago`;
+  }
+  const weeks = Math.max(1, Math.round(diffMs / week));
+  return `${weeks}w ago`;
+}
+
+function sortTripsByNewest(trips) {
+  return [...trips].sort((a, b) => {
+    const aTime = Date.parse(a.createdAt || "") || 0;
+    const bTime = Date.parse(b.createdAt || "") || 0;
+    return bTime - aTime;
+  });
+}
+
+function displayNameForProfile(profile, user) {
+  if (profile?.display_name) return profile.display_name;
+  if (user?.email) return user.email.split("@")[0];
+  return "Stash user";
+}
+
+function initialForProfile(profile, user) {
+  const source = displayNameForProfile(profile, user);
+  return source.charAt(0).toUpperCase() || "S";
+}
+
+function ProfileAvatar({ profile, user, className, textClassName }) {
+  if (profile?.avatar_url) {
+    return <img className={className} src={profile.avatar_url} alt="" aria-hidden="true" />;
+  }
+
+  return (
+    <span className={textClassName} aria-hidden="true">
+      {initialForProfile(profile, user)}
+    </span>
+  );
+}
+
+function ProfileListRow({ person }) {
+  const name = person?.display_name || person?.handle || "Stash user";
+  const handleText = person?.handle ? `@${person.handle}` : "No handle";
+
+  return (
+    <div className="profileShowcasePersonRow">
+      <div className="profileShowcasePersonIdentity">
+        <span className="profileShowcasePersonAvatar" aria-hidden="true">
+          {person?.avatar_url ? (
+            <img src={person.avatar_url} alt="" />
+          ) : (
+            <span className="profileShowcasePersonInitial">{name.charAt(0).toUpperCase()}</span>
+          )}
+        </span>
+        <div className="profileShowcasePersonCopy">
+          <div className="profileShowcasePersonName">{name}</div>
+          <div className="profileShowcasePersonHandle">{handleText}</div>
+        </div>
+      </div>
+      {person?.handle ? (
+        <Link className="profileShowcaseFollowBtn" to={`/@${person.handle}`}>
+          View
+        </Link>
+      ) : (
+        <span className="profileShowcaseFollowBtn disabled">Member</span>
+      )}
+    </div>
+  );
+}
 
 export default function Profile() {
-  const { user, loading, softLogout, clearRememberedProfile } = useAuth();
-  const { trips, renameTrip, deleteTrip } = useTrips();
+  const { user, loading } = useAuth();
+  const { trips } = useTrips();
   const navigate = useNavigate();
-  const [displayName, setDisplayName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState("");
-  const [sharedTrips, setSharedTrips] = useState([]);
-  const [sharedCopyMsg, setSharedCopyMsg] = useState("");
-  const [toastMsg, setToastMsg] = useState("");
-  const [confirmSignOut, setConfirmSignOut] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [initialDisplayName, setInitialDisplayName] = useState("");
-  const [showTokens, setShowTokens] = useState(false);
-  const [tokens, setTokens] = useState([]);
-  const [tokenStatus, setTokenStatus] = useState("");
-  const [loadingTokens, setLoadingTokens] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [generatedToken, setGeneratedToken] = useState(null);
-  const [tokenCopyMsg, setTokenCopyMsg] = useState("");
-  const [showRevokedTokens, setShowRevokedTokens] = useState(false);
-  const [avatarUrl, setAvatarUrl] = useState("");
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const fileInputRef = useRef(null);
-  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
-  const [shareMenuOpenId, setShareMenuOpenId] = useState("");
-  const [copiedTripId, setCopiedTripId] = useState("");
-  const [editingSharedTripId, setEditingSharedTripId] = useState("");
-  const [editingSharedTripName, setEditingSharedTripName] = useState("");
-  const [cropSrc, setCropSrc] = useState("");
-  const [cropZoom, setCropZoom] = useState(1);
-  const [cropMinZoom, setCropMinZoom] = useState(0.2);
-  const [cropMaxZoom, setCropMaxZoom] = useState(4);
-  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
-  const [cropNatural, setCropNatural] = useState({ w: 0, h: 0 });
-  const [isCropping, setIsCropping] = useState(false);
-  const cropImgRef = useRef(null);
-  const dragStateRef = useRef(null);
-  const cropFrameRef = useRef(null);
-  const [cropFrameSize, setCropFrameSize] = useState(240);
-  const outputSize = 512;
-  const rememberMeEnabled =
-    typeof window !== "undefined" && window.localStorage.getItem("stashRememberMe") === "true";
 
-  function makeShareId(length = 12) {
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let out = "";
-    for (let i = 0; i < length; i += 1) {
-      out += chars[Math.floor(Math.random() * chars.length)];
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [profileBusy, setProfileBusy] = useState(true);
+  const [profileError, setProfileError] = useState("");
+  const [activeTab, setActiveTab] = useState("collections");
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [saveCount, setSaveCount] = useState(0);
+  const [followingProfiles, setFollowingProfiles] = useState([]);
+  const [followerProfiles, setFollowerProfiles] = useState([]);
+
+  const categoryCounts = useMemo(
+    () =>
+      ["general", "travel", "fashion"].reduce((acc, category) => {
+        acc[category] = trips.filter((trip) => normalizeSection(trip.type) === category).length;
+        return acc;
+      }, {}),
+    [trips]
+  );
+
+  const sortedTrips = useMemo(() => sortTripsByNewest(trips), [trips]);
+
+  const collectionsForTab = useMemo(() => {
+    if (activeTab === "saves") {
+      return sortedTrips
+        .filter((trip) => Number(trip.saveCount || 0) > 0)
+        .sort((a, b) => Number(b.saveCount || 0) - Number(a.saveCount || 0));
     }
-    return out;
-  }
+    return sortedTrips;
+  }, [activeTab, sortedTrips]);
+
+  const activityItems = useMemo(() => {
+    return sortedTrips.slice(0, 5).map((trip) => ({
+      id: trip.id,
+      title: trip.isShared ? `Shared ${trip.name}` : `Updated ${trip.name}`,
+      subtitle: `${trip.items?.length || 0} links`,
+      when: formatRelativeTime(trip.createdAt),
+      mediaUrl: trip.coverImageUrl || "",
+    }));
+  }, [sortedTrips]);
 
   useEffect(() => {
     if (loading) return;
@@ -68,447 +178,104 @@ export default function Profile() {
       navigate("/login", { replace: true });
       return;
     }
+
     let mounted = true;
+
     async function loadProfile() {
-      const { data } = await supabase
-        .from("profiles")
-        .select("display_name, avatar_url")
-        .eq("id", user.id)
-        .single();
-      if (!mounted) return;
-      const name = data?.display_name || "";
-      setDisplayName(name);
-      setInitialDisplayName(name);
-      setAvatarUrl(data?.avatar_url || "");
+      setProfileBusy(true);
+      setProfileError("");
+
+      try {
+        const [profileResult, followersResult, followingResult, savesResult] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("display_name, handle, bio, avatar_url")
+            .eq("id", user.id)
+            .single(),
+          supabase
+            .from("follows")
+            .select("follower_user_id, created_at", { count: "exact" })
+            .eq("following_user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(12),
+          supabase
+            .from("follows")
+            .select("following_user_id, created_at", { count: "exact" })
+            .eq("follower_user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(12),
+          supabase
+            .from("list_saves")
+            .select("list_id", { count: "exact", head: true })
+            .eq("user_id", user.id),
+        ]);
+
+        if (!mounted) return;
+
+        if (profileResult.error) {
+          setProfileError("Could not load profile details right now.");
+        }
+
+        setProfile(profileResult.data || null);
+
+        const followersRows = followersResult.data || [];
+        const followingRows = followingResult.data || [];
+
+        setFollowerCount(
+          typeof followersResult.count === "number" ? followersResult.count : followersRows.length
+        );
+        setFollowingCount(
+          typeof followingResult.count === "number" ? followingResult.count : followingRows.length
+        );
+        setSaveCount(typeof savesResult.count === "number" ? savesResult.count : 0);
+
+        const followerIds = followersRows
+          .map((row) => row.follower_user_id)
+          .filter(Boolean);
+        const followingIds = followingRows
+          .map((row) => row.following_user_id)
+          .filter(Boolean);
+
+        const allIds = Array.from(new Set([...followerIds, ...followingIds]));
+        if (allIds.length === 0) {
+          setFollowerProfiles([]);
+          setFollowingProfiles([]);
+          return;
+        }
+
+        const { data: peopleRows, error: peopleError } = await supabase
+          .from("profiles")
+          .select("id, display_name, handle, avatar_url")
+          .in("id", allIds);
+
+        if (!mounted) return;
+
+        if (peopleError) {
+          setFollowerProfiles([]);
+          setFollowingProfiles([]);
+          return;
+        }
+
+        const peopleMap = new Map((peopleRows || []).map((row) => [row.id, row]));
+        setFollowerProfiles(followerIds.map((id) => peopleMap.get(id)).filter(Boolean));
+        setFollowingProfiles(followingIds.map((id) => peopleMap.get(id)).filter(Boolean));
+      } finally {
+        if (mounted) {
+          setProfileBusy(false);
+        }
+      }
     }
-    async function loadSharedTrips() {
-      const { data } = await supabase
-        .from("trips")
-        .select("id,name,share_id,is_shared,trip_items(count)")
-        .eq("owner_id", user.id)
-        .eq("is_shared", true)
-        .order("created_at", { ascending: false });
-      if (!mounted) return;
-      setSharedTrips(data || []);
-    }
+
     loadProfile();
-    loadSharedTrips();
+
     return () => {
       mounted = false;
     };
-  }, [loading, user, navigate]);
-
-  useEffect(() => {
-    if (!isCropping) return;
-    const measure = () => {
-      if (!cropFrameRef.current) return;
-      const rect = cropFrameRef.current.getBoundingClientRect();
-      if (rect.width) {
-        setCropFrameSize(rect.width);
-        if (cropNatural.w && cropNatural.h) {
-          setCropMinZoom(0.2);
-          setCropMaxZoom(4);
-          setCropZoom((prev) => {
-            const nextZoom = Math.max(0.2, prev);
-            setCropOffset((prevOffset) => clampCropOffset(prevOffset, nextZoom));
-            return nextZoom;
-          });
-        }
-      }
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [isCropping, cropNatural.w, cropNatural.h]);
-
-  useEffect(() => {
-    function handleDocumentClick(event) {
-      const target = event.target;
-      if (target && target.closest(".profileCollectionMenuWrap")) return;
-      setShareMenuOpenId("");
-    }
-
-    document.addEventListener("mousedown", handleDocumentClick);
-    return () => document.removeEventListener("mousedown", handleDocumentClick);
-  }, []);
-
-  async function handleSave() {
-    if (!user) return;
-    setSaving(true);
-    setStatus("");
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({ id: user.id, display_name: displayName || null });
-    setSaving(false);
-    if (error) {
-      setStatus("Could not save right now.");
-      return;
-    }
-    setStatus("Saved.");
-    if (rememberMeEnabled && typeof window !== "undefined") {
-      try {
-        const raw = window.localStorage.getItem("stashRememberedProfile");
-        const remembered = raw ? JSON.parse(raw) : null;
-        if (remembered) {
-          const updated = { ...remembered, name: displayName || remembered.name };
-          window.localStorage.setItem("stashRememberedProfile", JSON.stringify(updated));
-        }
-      } catch (err) {
-        // ignore invalid remembered profile payload
-      }
-    }
-    setTimeout(() => setStatus(""), 1500);
-  }
-
-  function handleAvatarChange(event) {
-    const file = event.target.files?.[0];
-    if (!file || !user) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setCropSrc(String(reader.result || ""));
-      setCropZoom(1);
-      setCropMinZoom(0.2);
-      setCropMaxZoom(4);
-      setCropOffset({ x: 0, y: 0 });
-      setCropNatural({ w: 0, h: 0 });
-      setIsCropping(true);
-      setShowAvatarMenu(false);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function clampCropOffset(nextOffset, zoomValue = cropZoom) {
-    const { w, h } = cropNatural;
-    if (!w || !h) return nextOffset;
-    const scale = zoomValue;
-    const maxX = Math.max(0, Math.abs(w * scale - cropFrameSize) / 2);
-    const maxY = Math.max(0, Math.abs(h * scale - cropFrameSize) / 2);
-    return {
-      x: Math.max(-maxX, Math.min(maxX, nextOffset.x)),
-      y: Math.max(-maxY, Math.min(maxY, nextOffset.y)),
-    };
-  }
-
-  async function handleCropSave() {
-    if (!user || !cropSrc || !cropImgRef.current) return;
-    setUploadingAvatar(true);
-    setToastMsg("");
-    try {
-      const { w, h } = cropNatural;
-      const scale = cropZoom;
-      const scaledW = w * scale;
-      const scaledH = h * scale;
-      const centerX = cropFrameSize / 2 + cropOffset.x;
-      const centerY = cropFrameSize / 2 + cropOffset.y;
-      const imgLeft = centerX - scaledW / 2;
-      const imgTop = centerY - scaledH / 2;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = outputSize;
-      canvas.height = outputSize;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas unavailable");
-      ctx.imageSmoothingQuality = "high";
-      const outScale = outputSize / cropFrameSize;
-      const coverScale = Math.max(outputSize / w, outputSize / h);
-      const coverW = w * coverScale;
-      const coverH = h * coverScale;
-      ctx.filter = "blur(14px)";
-      ctx.drawImage(
-        cropImgRef.current,
-        (outputSize - coverW) / 2,
-        (outputSize - coverH) / 2,
-        coverW,
-        coverH
-      );
-      ctx.filter = "none";
-      ctx.drawImage(
-        cropImgRef.current,
-        imgLeft * outScale,
-        imgTop * outScale,
-        scaledW * outScale,
-        scaledH * outScale
-      );
-
-      const blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/png", 0.92)
-      );
-      if (!blob) throw new Error("Could not process image");
-
-      const filePath = `${user.id}/${Date.now()}.png`;
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(filePath, blob, {
-          upsert: true,
-          contentType: "image/png",
-          cacheControl: "3600",
-        });
-      if (uploadError) {
-        setToastMsg("Could not upload photo.");
-        return;
-      }
-
-      const { data: publicData } = supabase.storage.from("avatars").getPublicUrl(filePath);
-      const publicUrl = publicData?.publicUrl;
-      if (!publicUrl) {
-        setToastMsg("Could not fetch photo URL.");
-        return;
-      }
-      const versionedUrl = `${publicUrl}?v=${Date.now()}`;
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: versionedUrl })
-        .eq("id", user.id);
-      if (updateError) {
-        setToastMsg("Could not save photo.");
-        return;
-      }
-
-      setAvatarUrl(versionedUrl);
-      if (rememberMeEnabled && typeof window !== "undefined") {
-        try {
-          const raw = window.localStorage.getItem("stashRememberedProfile");
-          const remembered = raw ? JSON.parse(raw) : null;
-          if (remembered) {
-            const updated = { ...remembered, avatar_url: versionedUrl };
-            window.localStorage.setItem("stashRememberedProfile", JSON.stringify(updated));
-          }
-        } catch (err) {
-          // ignore invalid remembered profile payload
-        }
-      }
-      setToastMsg("Photo updated");
-      setTimeout(() => setToastMsg(""), 1500);
-      setIsCropping(false);
-      setCropSrc("");
-    } finally {
-      setUploadingAvatar(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
-
-  async function handleRemoveAvatar() {
-    if (!user) return;
-    setUploadingAvatar(true);
-    setToastMsg("");
-
-    try {
-      if (avatarUrl) {
-        const marker = "/storage/v1/object/public/avatars/";
-        const idx = avatarUrl.indexOf(marker);
-        if (idx !== -1) {
-          const path = avatarUrl.slice(idx + marker.length);
-          if (path) {
-            await supabase.storage.from("avatars").remove([path]);
-          }
-        }
-      }
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ avatar_url: null })
-        .eq("id", user.id);
-
-      if (error) {
-        setToastMsg("Could not remove photo.");
-        return;
-      }
-
-      setAvatarUrl("");
-      setToastMsg("Photo removed");
-      setTimeout(() => setToastMsg(""), 1500);
-    } finally {
-      setUploadingAvatar(false);
-      setShowAvatarMenu(false);
-    }
-  }
-
-  async function handleCopyShare(trip) {
-    const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
-    const shareBase = rawShareBase.replace(/\/+$/, "");
-    const shareUrl = `${shareBase}/share/${trip.share_id}`;
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(shareUrl);
-      setSharedCopyMsg("Copied link");
-      setToastMsg("Copied");
-      setCopiedTripId(trip.id);
-      setTimeout(() => setSharedCopyMsg(""), 1500);
-      setTimeout(() => setToastMsg(""), 1500);
-      setTimeout(() => setCopiedTripId(""), 1500);
-    }
-  }
-
-  async function handleUnshareShare(trip) {
-    const { error } = await supabase
-      .from("trips")
-      .update({ is_shared: false, share_id: null })
-      .eq("id", trip.id)
-      .eq("owner_id", user.id);
-    if (error) {
-      setStatus("Could not revoke share.");
-      return;
-    }
-    setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
-    setToastMsg("Share revoked");
-    setTimeout(() => setToastMsg(""), 1500);
-  }
-
-  async function handleRenameShareSave(trip) {
-    const trimmed = (editingSharedTripName || "").trim();
-    if (!trimmed) return;
-    await renameTrip(trip.id, trimmed);
-    setSharedTrips((prev) =>
-      prev.map((t) => (t.id === trip.id ? { ...t, name: trimmed } : t))
-    );
-    setEditingSharedTripId("");
-    setEditingSharedTripName("");
-    setToastMsg("Renamed");
-    setTimeout(() => setToastMsg(""), 1500);
-  }
-
-  function handleRenameShareCancel() {
-    setEditingSharedTripId("");
-    setEditingSharedTripName("");
-  }
-
-  async function handleDeleteShare(trip) {
-    const confirmed = window.confirm(
-      "Delete this collection? This permanently removes it and its links."
-    );
-    if (!confirmed) return;
-    await deleteTrip(trip.id);
-    setSharedTrips((prev) => prev.filter((t) => t.id !== trip.id));
-    setToastMsg("Deleted");
-    setTimeout(() => setToastMsg(""), 1500);
-  }
-
-  async function handleRegenerateShare(trip) {
-    const nextShareId = makeShareId(12);
-    const { error } = await supabase
-      .from("trips")
-      .update({ is_shared: true, share_id: nextShareId })
-      .eq("id", trip.id)
-      .eq("owner_id", user.id);
-    if (error) {
-      setStatus("Could not regenerate link.");
-      return;
-    }
-    setSharedTrips((prev) =>
-      prev.map((t) => (t.id === trip.id ? { ...t, share_id: nextShareId, is_shared: true } : t))
-    );
-    setToastMsg("Link regenerated");
-    setTimeout(() => setToastMsg(""), 1500);
-  }
-
-  function handleOpenTrip(trip) {
-    navigate(`/trips/${trip.id}`);
-  }
-
-  useEffect(() => {
-    if (!showTokens || !user) return;
-    async function loadTokens() {
-      setLoadingTokens(true);
-      const { data, error } = await supabase
-        .from("extension_tokens")
-        .select("id, token_prefix, created_at, last_used_at, revoked_at")
-        .order("created_at", { ascending: false });
-      if (error) {
-        setTokenStatus("Could not load tokens.");
-        setLoadingTokens(false);
-        return;
-      }
-      setTokens(data || []);
-      setLoadingTokens(false);
-    }
-    loadTokens();
-  }, [showTokens, user]);
-
-  async function handleGenerateToken() {
-    setGenerating(true);
-    setTokenStatus("");
-    setGeneratedToken(null);
-
-    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "";
-    if (!supabaseUrl) {
-      setTokenStatus("Missing Supabase URL env var.");
-      setGenerating(false);
-      return;
-    }
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) {
-      setTokenStatus("You need to sign in again.");
-      setGenerating(false);
-      return;
-    }
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/token-create`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-
-    if (!response.ok) {
-      setTokenStatus("Could not create token.");
-      setGenerating(false);
-      return;
-    }
-
-    const payload = await response.json();
-    if (!payload?.token) {
-      setTokenStatus("Token response missing.");
-      setGenerating(false);
-      return;
-    }
-
-    setGeneratedToken(payload);
-    setGenerating(false);
-    setShowTokens(true);
-    setTokenStatus("This is the only time you will see this token. Copy it now.");
-  }
-
-  async function handleCopyToken(token) {
-    if (!navigator.clipboard?.writeText) return;
-    await navigator.clipboard.writeText(token);
-    setTokenCopyMsg("Copied token");
-    setTimeout(() => setTokenCopyMsg(""), 1500);
-  }
-
-  async function handleRevokeToken(tokenId) {
-    const { error } = await supabase
-      .from("extension_tokens")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("id", tokenId);
-    if (error) {
-      setTokenStatus("Could not revoke token.");
-      return;
-    }
-    setTokens((prev) => prev.map((t) => (t.id === tokenId ? { ...t, revoked_at: true } : t)));
-  }
-
-  const isDisplayNameDirty = displayName.trim() !== initialDisplayName.trim();
-  const visibleTokens = useMemo(() => {
-    if (showRevokedTokens) return tokens;
-    return tokens.filter((token) => !token.revoked_at);
-  }, [showRevokedTokens, tokens]);
-
-  const categoryCounts = useMemo(
-    () =>
-      ["general", "travel", "fashion"].reduce((acc, category) => {
-        acc[category] = trips.filter((trip) => (trip.type || "general") === category).length;
-        return acc;
-      }, {}),
-    [trips]
-  );
+  }, [loading, navigate, user]);
 
   if (loading) {
     return (
-      <div className="page profilePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <div className="page profilePage profileShowcasePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
         <AppShell
           sidebar={
             <SidebarNav
@@ -527,16 +294,19 @@ export default function Profile() {
           topbar={
             <TopBar
               title="Profile"
-              subtitle="Manage your account and shared collections."
+              subtitle="Your collections and social activity"
               searchValue=""
               onSearchChange={() => {}}
               onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
               actions={
-                user ? (
-                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                    <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
-                  </Link>
-                ) : null
+                <Link className="topbarIconBtn" to="/profile/settings" aria-label="Profile settings">
+                  <img
+                    className="profileSettingsCogIcon"
+                    src={settingsIcon}
+                    alt=""
+                    aria-hidden="true"
+                  />
+                </Link>
               }
             />
           }
@@ -553,14 +323,23 @@ export default function Profile() {
 
   if (!user) return null;
 
+  const displayName = displayNameForProfile(profile, user);
+  const handleText = profile?.handle ? `@${profile.handle}` : "@stash";
+  const bio = profile?.bio || "Organizing inspiration, plans, and shared collections.";
+
+  const tabs = [
+    { id: "collections", label: "Collections" },
+    { id: "saves", label: "Saves" },
+    { id: "activity", label: "Activity" },
+    { id: "followers", label: "Followers" },
+  ];
+
   return (
-    <div className="page profilePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+    <div className="page profilePage profileShowcasePage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
       <AppShell
         sidebar={
           <SidebarNav
-            brandIcon={
-              <img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />
-            }
+            brandIcon={<img className="sidebarBrandIcon" src={stashLogo} alt="" aria-hidden="true" />}
             activeSection={null}
             categoryCounts={categoryCounts}
             onSelectSection={(category) => {
@@ -573,606 +352,214 @@ export default function Profile() {
         topbar={
           <TopBar
             title="Profile"
-            subtitle="Manage your account and shared collections."
+            subtitle="Your collections and social activity"
             searchValue=""
             onSearchChange={() => {}}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
             actions={
-              user ? (
-                <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                  <img className="topbarAvatar" src={userIcon} alt="" aria-hidden="true" />
-                </Link>
-              ) : null
+              <Link className="topbarIconBtn" to="/profile/settings" aria-label="Profile settings">
+                <img
+                  className="profileSettingsCogIcon"
+                  src={settingsIcon}
+                  alt=""
+                  aria-hidden="true"
+                />
+              </Link>
             }
           />
         }
         isSidebarOpen={sidebarOpen}
         onCloseSidebar={() => setSidebarOpen(false)}
       >
-        {toastMsg && <div className="toast">{toastMsg}</div>}
-        <div className="panel p-5 profileContainer">
-          <section className="profileEditBlock">
-            <div className="profileEditTitle">Edit profile</div>
-            <div className="profileEditCard">
-              <div className="profileEditIdentity">
-                <button
-                  type="button"
-                  className="profileEditAvatar"
-                  onClick={() => setShowAvatarMenu(true)}
-                  aria-label="Change profile photo"
-                >
-                  <img
-                    src={avatarUrl || userIcon}
-                    className={avatarUrl ? "profileAvatarPhoto" : "profileAvatarPlaceholder"}
-                    alt=""
-                    aria-hidden="true"
-                  />
-                </button>
-                <div className="profileEditName">
-                  {displayName || user.email}
-                </div>
-              </div>
-              <button
-                className="profileEditAction"
-                type="button"
-                onClick={() => setShowAvatarMenu(true)}
-                disabled={uploadingAvatar}
-              >
-                {uploadingAvatar ? "Uploading..." : "Change photo"}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleAvatarChange}
-                className="visuallyHidden"
-              />
-            </div>
+        <section className="panel p-5 profileShowcasePanel">
+          {profileError && <div className="warning">{profileError}</div>}
 
-            {showAvatarMenu && (
-              <div
-                className="profilePhotoOverlay"
-                role="dialog"
-                aria-modal="true"
-                onClick={() => setShowAvatarMenu(false)}
-              >
-                <div
-                  className="profilePhotoModal"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="profilePhotoTitle">Change profile photo</div>
-                  <button
-                    className="profilePhotoAction"
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    Upload photo
-                  </button>
-                  {avatarUrl && (
-                    <button
-                      className="profilePhotoAction danger"
-                      type="button"
-                      onClick={handleRemoveAvatar}
-                    >
-                      Remove current photo
-                    </button>
-                  )}
-                  <button
-                    className="profilePhotoAction"
-                    type="button"
-                    onClick={() => setShowAvatarMenu(false)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {isCropping && (
-              <div
-                className="profilePhotoOverlay"
-                role="dialog"
-                aria-modal="true"
-                onClick={() => setIsCropping(false)}
-              >
-                <div
-                  className="profileCropModal"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="profilePhotoTitle">Crop your photo</div>
-                  <div
-                    className="profileCropFrame"
-                    ref={cropFrameRef}
-                    onPointerDown={(event) => {
-                      if (!cropSrc) return;
-                      event.preventDefault();
-                      dragStateRef.current = {
-                        startX: event.clientX,
-                        startY: event.clientY,
-                        startOffset: { ...cropOffset },
-                      };
-                    }}
-                    onPointerMove={(event) => {
-                      if (!dragStateRef.current) return;
-                      event.preventDefault();
-                      const { startX, startY, startOffset } = dragStateRef.current;
-                      const nextOffset = {
-                        x: startOffset.x + (event.clientX - startX),
-                        y: startOffset.y + (event.clientY - startY),
-                      };
-                      setCropOffset(clampCropOffset(nextOffset));
-                    }}
-                    onPointerUp={() => {
-                      dragStateRef.current = null;
-                    }}
-                    onPointerLeave={() => {
-                      dragStateRef.current = null;
-                    }}
-                  >
-                    {cropSrc && (
-                      <>
-                        <img
-                          className="profileCropBg"
-                          src={cropSrc}
-                          alt=""
-                          aria-hidden="true"
-                        />
-                        <img
-                          ref={cropImgRef}
-                          className="profileCropImage"
-                          src={cropSrc}
-                          alt=""
-                          onLoad={(event) => {
-                            const { naturalWidth, naturalHeight } = event.target;
-                            const nextNatural = { w: naturalWidth, h: naturalHeight };
-                            setCropNatural(nextNatural);
-                          setCropMinZoom(0.2);
-                          setCropMaxZoom(4);
-                          setCropZoom(1);
-                          setCropOffset({ x: 0, y: 0 });
-                          }}
-                          style={{
-                            transform: (() => {
-                              const { w, h } = cropNatural;
-                              if (!w || !h) return "translate(-50%, -50%) scale(1)";
-                              const scale = cropZoom;
-                              return `translate(-50%, -50%) translate(${cropOffset.x}px, ${cropOffset.y}px) scale(${scale})`;
-                            })(),
-                          }}
-                        />
-                      </>
-                    )}
-                    <div className="profileCropMask" aria-hidden="true" />
-                    <div className="profileCropSafeRing" aria-hidden="true" />
-                  </div>
-                  <div className="profileCropHint">Move and zoom to fit</div>
-                  <div className="profileCropControls">
-                    <input
-                      className="profileCropSlider"
-                      type="range"
-                      min={cropMinZoom}
-                      max={cropMaxZoom}
-                      step="0.01"
-                      value={cropZoom}
-                      onChange={(event) => {
-                        const nextZoom = Number(event.target.value);
-                        setCropZoom(nextZoom);
-                        setCropOffset((prev) => clampCropOffset(prev, nextZoom));
-                      }}
+          <div className="profileShowcaseLayout">
+            <div className="profileShowcaseMain">
+              <section className="profileShowcaseHero">
+                <div className="profileShowcaseIdentity">
+                  <div className="profileShowcaseAvatarWrap" aria-hidden="true">
+                    <ProfileAvatar
+                      profile={profile}
+                      user={user}
+                      className="profileShowcaseAvatarImage"
+                      textClassName="profileShowcaseAvatarText"
                     />
-                    <div className="profileCropActions">
-                      <button
-                        className="profilePhotoAction"
-                        type="button"
-                        onClick={() => {
-                          setIsCropping(false);
-                          setCropSrc("");
-                        }}
-                        disabled={uploadingAvatar}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="profilePhotoAction primary"
-                        type="button"
-                        onClick={handleCropSave}
-                        disabled={uploadingAvatar}
-                      >
-                        {uploadingAvatar ? "Saving..." : "Save photo"}
-                      </button>
+                  </div>
+
+                  <div className="profileShowcaseCopy">
+                    <h1 className="profileShowcaseName">{displayName}</h1>
+                    <div className="profileShowcaseHandle">{handleText}</div>
+                    <p className="profileShowcaseBio">{bio}</p>
+
+                    <div className="profileShowcaseStats" aria-label="Profile stats">
+                      <div className="profileShowcaseStat">
+                        <span className="profileShowcaseStatValue">{followingCount}</span>
+                        <span className="profileShowcaseStatLabel">Following</span>
+                      </div>
+                      <div className="profileShowcaseStat">
+                        <span className="profileShowcaseStatValue">{followerCount}</span>
+                        <span className="profileShowcaseStatLabel">Followers</span>
+                      </div>
+                      <div className="profileShowcaseStat">
+                        <span className="profileShowcaseStatValue">{trips.length}</span>
+                        <span className="profileShowcaseStatLabel">Collections</span>
+                      </div>
+                      <div className="profileShowcaseStat">
+                        <span className="profileShowcaseStatValue">{saveCount}</span>
+                        <span className="profileShowcaseStatLabel">Saves</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </section>
+              </section>
 
-          <section className="profileBlock">
-            <div className="profileBlockTitle">Identity</div>
-            <div className="profileSection">
-              <div className="profileLabel">Email</div>
-              <div className="profileValue mutedValue">{user.email}</div>
-            </div>
-
-            <div className="profileSection">
-              <div className="profileLabel">Display name</div>
-              <form
-                className="profileRow profileDisplayRow"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  handleSave();
-                }}
-              >
-                <input
-                  className="input displayInput profileDisplayInput"
-                  placeholder="Add a display name"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                />
-                <button
-                  className={`profilePrimaryBtn ${isDisplayNameDirty ? "isActive" : ""}`}
-                  type="submit"
-                  disabled={saving || !isDisplayNameDirty}
-                >
-                  {saving ? "Saving..." : "Save"}
-                </button>
-              </form>
-              {status && <div className="savedMsg">{status}</div>}
-            </div>
-          </section>
-
-          <div className="profileSectionDivider" />
-
-          <section className="profileBlock">
-            <div className="profileBlockTitle">Browser integration</div>
-            <div className="profileInlineNote">
-              Generate and revoke tokens to sync your browser extension.
-            </div>
-            <button
-              className={`tokenDisclosureToggle ${showTokens ? "isOpen" : ""}`}
-              type="button"
-              onClick={() => setShowTokens((prev) => !prev)}
-              aria-expanded={showTokens}
-            >
-              <span className="tokenDisclosureChevron" aria-hidden="true" />
-              Manage browser extension tokens
-            </button>
-            <div className={`tokenDisclosure ${showTokens ? "isOpen" : ""}`}>
-              <div className="tokenInlineSection">
-                {tokenStatus && <div className="tokenNotice">{tokenStatus}</div>}
-                {tokenCopyMsg && <div className="profileToast">{tokenCopyMsg}</div>}
-                {generatedToken?.token && (
-                  <div className="tokenRevealInline">
-                    <div className="tokenValue">{generatedToken.token}</div>
-                    <button
-                      className="miniBtn blue"
-                      type="button"
-                      onClick={() => handleCopyToken(generatedToken.token)}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                )}
-                <div className="tokenListInline">
-                  {loadingTokens ? (
-                    <div className="muted">Loading tokens...</div>
-                  ) : visibleTokens.length === 0 ? (
-                    <div className="muted">No active extension tokens found.</div>
-                  ) : (
-                    visibleTokens.map((token) => (
-                      <div
-                        key={token.id}
-                        className={`tokenRowInline ${token.revoked_at ? "isRevoked" : ""}`}
-                      >
-                        <div className="tokenMetaInline">
-                          <div className="tokenPrefix">Prefix: {token.token_prefix}</div>
-                          <div className="tokenDatesInline">
-                            Created {new Date(token.created_at).toLocaleDateString()}
-                            {token.last_used_at
-                              ? ` • Last used ${new Date(token.last_used_at).toLocaleDateString()}`
-                              : ""}
-                          </div>
-                        </div>
-                        <button
-                          className="tokenRevokeLink"
-                          type="button"
-                          onClick={() => handleRevokeToken(token.id)}
-                          disabled={!!token.revoked_at}
-                          title="Revoke token"
-                        >
-                          {token.revoked_at ? "Revoked" : "Revoke"}
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {tokens.some((token) => token.revoked_at) && (
+              <section className="profileShowcaseTabs" role="tablist" aria-label="Profile sections">
+                {tabs.map((tab) => (
                   <button
-                    className="tokenRevokedToggle"
+                    key={tab.id}
+                    className={`profileShowcaseTab ${activeTab === tab.id ? "isActive" : ""}`}
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
                     type="button"
-                    onClick={() => setShowRevokedTokens((prev) => !prev)}
+                    onClick={() => setActiveTab(tab.id)}
                   >
-                    {showRevokedTokens ? "Hide revoked tokens" : "Show revoked tokens"}
+                    {tab.label}
                   </button>
-                )}
-                <button
-                  className="tokenGenerateBtn"
-                  type="button"
-                  onClick={handleGenerateToken}
-                  disabled={generating}
-                >
-                  {generating ? "Generating..." : "Generate new token"}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="profileBlock">
-            <div className="profileLabelRow">
-              <div className="profileLabel">My shared collections</div>
-              {sharedCopyMsg && <div className="profileToast">{sharedCopyMsg}</div>}
-            </div>
-            {sharedTrips.length === 0 ? (
-              <div className="sharedEmptyState">
-                <div className="sharedEmptyTitle">No shared collections yet</div>
-                <div className="sharedEmptyText">
-                  Share a collection to let others browse your links without editing anything.
-                </div>
-                <div className="sharedEmptyText">
-                  You control what’s shared and can unshare anytime.
-                </div>
-                <button
-                  className="sharedEmptyCta"
-                  type="button"
-                  onClick={() => navigate("/trips")}
-                >
-                  Share a collection
-                </button>
-              </div>
-            ) : (
-              <div className="profileTripList">
-                {sharedTrips.map((trip) => (
-                  <div
-                    key={trip.id}
-                    className="profileTripRow collection-card clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      if (editingSharedTripId === trip.id) return;
-                      handleOpenTrip(trip);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        if (editingSharedTripId === trip.id) return;
-                        handleOpenTrip(trip);
-                      }
-                    }}
-                  >
-                    {editingSharedTripId === trip.id ? (
-                      <div className="tripRenameRow">
-                        <input
-                          className="input tripRenameInput"
-                          value={editingSharedTripName}
-                          onChange={(event) => setEditingSharedTripName(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleRenameShareSave(trip);
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              handleRenameShareCancel();
-                            }
-                          }}
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                        <div className="tripRenameActions" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            className="tripRenameIcon save"
-                            type="button"
-                            onClick={() => handleRenameShareSave(trip)}
-                            title="Save name"
-                            aria-label="Save name"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path
-                                d="M5 12l4 4 10-10"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            className="tripRenameIcon cancel"
-                            type="button"
-                            onClick={handleRenameShareCancel}
-                            title="Cancel changes"
-                            aria-label="Cancel changes"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path
-                                d="M6 6l12 12M18 6l-12 12"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="card-info">
-                          <h3 className="card-title">{trip.name}</h3>
-                          <span className="card-subtitle">
-                            {(trip.trip_items?.[0]?.count || 0)} links
-                          </span>
-                        </div>
-                        <div className="card-actions">
-                          <button
-                            className={`btn-copy ${copiedTripId === trip.id ? "isCopied" : ""}`}
-                            type="button"
-                            aria-label="Copy link"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleCopyShare(trip);
-                            }}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path
-                                d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19.5"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                            {copiedTripId === trip.id ? "Copied" : "Copy"}
-                          </button>
-                          <div
-                            className="profileCollectionMenuWrap"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <button
-                              className="btn-more"
-                              type="button"
-                              aria-label="More options"
-                              onClick={() =>
-                                setShareMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
-                              }
-                            >
-                              ⋮
-                            </button>
-                            {shareMenuOpenId === trip.id && (
-                              <div className="collectionMenu" role="menu">
-                                <button
-                                  className="collectionMenuItem"
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setEditingSharedTripId(trip.id);
-                                    setEditingSharedTripName(trip.name || "");
-                                    setShareMenuOpenId("");
-                                  }}
-                                >
-                                  Rename
-                                </button>
-                                <button
-                                  className="collectionMenuItem danger"
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleUnshareShare(trip);
-                                    setShareMenuOpenId("");
-                                  }}
-                                >
-                                  Unshare
-                                </button>
-                                <button
-                                  className="collectionMenuItem danger"
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleDeleteShare(trip);
-                                    setShareMenuOpenId("");
-                                  }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <span className="card-chevron" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" focusable="false">
-                              <path
-                                d="M9 6l6 6-6 6"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </div>
                 ))}
-              </div>
-            )}
-          </section>
+              </section>
 
-          <section className="profileBlock profileBlockLast">
-            <div className="profileBlockTitle">Account management</div>
-            {confirmSignOut ? (
-              <div className="signOutConfirm">
-                <div>Sign out of this device?</div>
-                <div className="signOutActions">
-                  <button
-                    className="profileDangerBtn"
-                    type="button"
-                    onClick={() => {
-                      if (rememberMeEnabled) {
-                        softLogout();
-                        navigate("/", { replace: true });
-                        setConfirmSignOut(false);
-                        return;
-                      }
-                      clearRememberedProfile();
-                      supabase.auth.signOut();
-                    }}
-                  >
-                    Sign out
-                  </button>
-                  {rememberMeEnabled && (
-                    <button
-                      className="miniBtn danger"
-                      type="button"
-                      onClick={() => {
-                        clearRememberedProfile();
-                        supabase.auth.signOut();
-                        navigate("/", { replace: true });
-                        setConfirmSignOut(false);
-                      }}
-                    >
-                      Forget this device
-                    </button>
-                  )}
-                  <button
-                    className="miniBtn"
-                    type="button"
-                    onClick={() => setConfirmSignOut(false)}
-                  >
-                    Cancel
-                  </button>
+              {activeTab === "collections" || activeTab === "saves" ? (
+                collectionsForTab.length > 0 ? (
+                  <section className="profileShowcaseGrid" aria-label="Collections">
+                    {collectionsForTab.map((trip) => {
+                      const section = normalizeSection(trip.type);
+                      const coverImage = String(trip.coverImageUrl || "").trim();
+                      const fallbackGradient = makeFallbackGradient(`${trip.id}-${trip.name || "trip"}`);
+                      const gradientCover =
+                        isGradientCover(coverImage) || String(trip.coverImageSource || "").trim() === "gradient";
+                      const imageCover = !!coverImage && !gradientCover && !coverImage.startsWith("data:");
+                      const coverBackground = gradientCover ? coverImage || fallbackGradient : fallbackGradient;
+
+                      return (
+                        <button
+                          key={trip.id}
+                          className="profileShowcaseCard"
+                          type="button"
+                          onClick={() => navigate(`/trips/${trip.id}`)}
+                        >
+                          <div className="profileShowcaseCardMedia" style={{ backgroundImage: coverBackground }}>
+                            {imageCover ? <img src={coverImage} alt="" loading="lazy" /> : null}
+                            <div className="profileShowcaseCardShade" />
+                            <div className="profileShowcaseCardBody">
+                              <div className="profileShowcaseCardTitle">{trip.name || "Untitled collection"}</div>
+                              <div className="profileShowcaseCardMeta">
+                                {trip.items?.length || 0} links - {formatRelativeTime(trip.createdAt)}
+                              </div>
+                              <div className="profileShowcaseCardFooter">
+                                <span className="profileShowcaseCardTag">{SECTION_LABELS[section]}</span>
+                                <span className="profileShowcaseCardCount">{Number(trip.saveCount || 0)} saves</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </section>
+                ) : (
+                  <div className="profileShowcaseEmpty">
+                    {activeTab === "saves"
+                      ? "No saved collections yet."
+                      : "No collections yet. Start by creating one from your Collections page."}
+                  </div>
+                )
+              ) : null}
+
+              {activeTab === "activity" ? (
+                activityItems.length > 0 ? (
+                  <section className="profileShowcaseStack" aria-label="Activity list">
+                    {activityItems.map((item) => (
+                      <div key={item.id} className="profileShowcaseStackItem">
+                        <div className="profileShowcaseStackTitle">{item.title}</div>
+                        <div className="profileShowcaseStackMeta">{item.subtitle}</div>
+                        <div className="profileShowcaseStackTime">{item.when}</div>
+                      </div>
+                    ))}
+                  </section>
+                ) : (
+                  <div className="profileShowcaseEmpty">No recent activity.</div>
+                )
+              ) : null}
+
+              {activeTab === "followers" ? (
+                followerProfiles.length > 0 ? (
+                  <section className="profileShowcaseStack" aria-label="Followers list">
+                    {followerProfiles.map((person) => (
+                      <ProfileListRow key={person.id} person={person} />
+                    ))}
+                  </section>
+                ) : (
+                  <div className="profileShowcaseEmpty">No followers yet.</div>
+                )
+              ) : null}
+            </div>
+
+            <aside className="profileShowcaseRail" aria-label="Profile sidebar">
+              <section className="profileShowcaseRailCard">
+                <div className="profileShowcaseRailHeader">
+                  <h2>Activity</h2>
+                  <span>{activityItems.length}</span>
                 </div>
-              </div>
-            ) : (
-              <button
-                className="profileDangerBtn"
-                type="button"
-                onClick={() => setConfirmSignOut(true)}
-              >
-                Sign out
-              </button>
-            )}
-          </section>
-        </div>
+                {profileBusy ? (
+                  <div className="profileShowcaseRailEmpty">Loading...</div>
+                ) : activityItems.length > 0 ? (
+                  <div className="profileShowcaseRailList">
+                    {activityItems.slice(0, 4).map((item) => {
+                      const mediaUrl = String(item.mediaUrl || "").trim();
+                      const gradientThumb = isGradientCover(mediaUrl);
+                      const imageThumb = !!mediaUrl && !gradientThumb;
+                      return (
+                        <div key={item.id} className="profileShowcaseRailItem">
+                          <div
+                            className="profileShowcaseRailThumb"
+                            aria-hidden="true"
+                            style={gradientThumb ? { backgroundImage: mediaUrl, backgroundSize: "cover" } : undefined}
+                          >
+                            {imageThumb ? <img src={mediaUrl} alt="" /> : <span>{initialForProfile(profile, user)}</span>}
+                          </div>
+                          <div className="profileShowcaseRailCopy">
+                            <div className="profileShowcaseRailTitle">{item.title}</div>
+                            <div className="profileShowcaseRailMeta">{item.when}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="profileShowcaseRailEmpty">No recent updates.</div>
+                )}
+              </section>
+
+              <section className="profileShowcaseRailCard">
+                <div className="profileShowcaseRailHeader">
+                  <h2>Following</h2>
+                  <span>{followingCount}</span>
+                </div>
+                {profileBusy ? (
+                  <div className="profileShowcaseRailEmpty">Loading...</div>
+                ) : followingProfiles.length > 0 ? (
+                  <div className="profileShowcaseRailPeople">
+                    {followingProfiles.slice(0, 4).map((person) => (
+                      <ProfileListRow key={person.id} person={person} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="profileShowcaseRailEmpty">You are not following anyone yet.</div>
+                )}
+              </section>
+            </aside>
+          </div>
+        </section>
       </AppShell>
     </div>
   );

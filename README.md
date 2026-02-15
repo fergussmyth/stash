@@ -3,7 +3,7 @@
 A clean way to save links while you browse.
 
 
-![showcase](image-1.png)
+![showcase](docs/assets/app-showcase.png)
 
 ## What it does
 - Save Airbnb links from pasted text (including short/slink URLs) or the browser extension.
@@ -16,7 +16,7 @@ A clean way to save links while you browse.
 ## Chrome extension (start here)
 Stash lives in the browser so you can save a page the moment you see it.
 
-![extension showcase](image.png)
+![extension showcase](docs/assets/extension-showcase.png)
 
 ## Run locally
 From the project root:
@@ -49,6 +49,35 @@ REACT_APP_SUPABASE_URL=your_supabase_url
 REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
 # Optional: public URL used in shared links (e.g. ngrok/domain)
 REACT_APP_SHARE_ORIGIN=https://your-public-domain.com
+```
+
+Optional: set this Supabase Edge Function secret to use Unsplash as an extra cover source:
+
+```bash
+supabase secrets set UNSPLASH_ACCESS_KEY=your_unsplash_access_key
+```
+
+Automatic cover generation works without Unsplash by using Wikimedia/Wikipedia lookups, then query-based fallback image providers, and only then gradients.
+
+## Project structure
+```text
+.
+├─ src/                 # React web app source
+│  ├─ components/
+│  ├─ hooks/
+│  ├─ lib/
+│  └─ pages/
+├─ public/              # Static web assets
+├─ server/              # Local API server + social services
+├─ supabase/
+│  ├─ functions/        # Edge functions
+│  └─ ...
+├─ extension/           # Browser extension source
+├─ migrations/          # SQL migrations
+├─ docs/
+│  ├─ assets/           # README/media assets
+│  └─ screenshots/
+└─ README.md
 ```
 
 ## Short roadmap

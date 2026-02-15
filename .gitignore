@@ -10,6 +10,9 @@
 
 # production
 /build
+/server/.cache
+/server/node_modules
+/supabase/.temp
 
 # misc
 .DS_Store

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useAnimation, useReducedMotion } from "framer-motion";
 import ideasGraphic from "../assets/images/new-ideas-graphic.png";
 import productsGraphic from "../assets/images/new-products-graphic.png";
@@ -12,7 +12,10 @@ function HeroCards({ forceMotion = false }) {
   const cardControlTwo = useAnimation();
   const cardControlThree = useAnimation();
   const finalControls = useAnimation();
-  const cardControls = [cardControlOne, cardControlTwo, cardControlThree];
+  const cardControls = useMemo(
+    () => [cardControlOne, cardControlTwo, cardControlThree],
+    [cardControlOne, cardControlTwo, cardControlThree]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +99,7 @@ function HeroCards({ forceMotion = false }) {
     return () => {
       cancelled = true;
     };
-  }, [cardControlOne, cardControlTwo, cardControlThree, finalControls, shouldReduce]);
+  }, [cardControls, finalControls, shouldReduce]);
 
   const transformTemplate = (_props, generated) => `translate(-50%, -50%) ${generated}`;
 
@@ -147,6 +150,11 @@ export default function CollectionsIntroModal({ open, onClose, isEmpty = false }
   const previouslyFocusedRef = useRef(null);
   const [allowBackdropClose, setAllowBackdropClose] = useState(false);
   const [closeLocked, setCloseLocked] = useState(false);
+  const closeLockedRef = useRef(closeLocked);
+
+  useEffect(() => {
+    closeLockedRef.current = closeLocked;
+  }, [closeLocked]);
 
   useEffect(() => {
     if (!open) return;
@@ -163,7 +171,7 @@ export default function CollectionsIntroModal({ open, onClose, isEmpty = false }
     function handleKey(event) {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (!closeLocked) {
+        if (!closeLockedRef.current) {
           onClose();
         }
         return;

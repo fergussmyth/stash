@@ -11,69 +11,6 @@ import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import Dropdown from "../components/Dropdown";
 import stashLogo from "../assets/icons/stash-favicon.png";
-import userIcon from "../assets/icons/user.png";
-
-function IconList(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconCompare(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <rect x="3" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
-      <rect x="13" y="5" width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function IconExternal(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M14 4h6v6M10 14l10-10M5 9v10h10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconCopy(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <rect x="9" y="9" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
-      <rect x="4" y="4" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function IconTrash(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function IconNote(props) {
   return (
@@ -177,6 +114,38 @@ function decodeHtmlEntities(text = "") {
   return el.value;
 }
 
+async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2600) {
+  async function postJsonWithTimeout(path, body, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      return await response.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  try {
+    const data = await postJsonWithTimeout(endpoint, { url }, timeoutMs);
+    const title = String(data?.title || "").trim();
+    if (title) return title;
+
+    const previewData = await postJsonWithTimeout("/fetch-link-preview", { url }, timeoutMs + 1800);
+    const previewTitle = String(previewData?.title || "").trim();
+    return previewTitle || null;
+  } catch {
+    return null;
+  }
+}
+
 function getCollectionLabel(type) {
   if (type === "fashion") return "Fashion list";
   if (type === "travel") return "Shortlist";
@@ -196,6 +165,20 @@ function getDomain(url) {
   } catch {
     return "";
   }
+}
+
+function normalizeUrl(input = "") {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(?:\/|$)/i.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function getPlatform(domain = "") {
+  if (!domain) return "";
+  if (domain.includes("airbnb.")) return "airbnb";
+  return "";
 }
 
 function normalizeText(value = "") {
@@ -316,6 +299,95 @@ function extractAirbnbMetaFromTitle(title = "") {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_MS = 30 * DAY_MS;
+const ECOMMERCE_DOMAIN_HINTS = [
+  "amazon.",
+  "asos.",
+  "nike.",
+  "adidas.",
+  "ebay.",
+  "etsy.",
+  "target.",
+  "walmart.",
+  "bestbuy.",
+  "shopify.",
+  "zara.",
+  "hm.",
+  "uniqlo.",
+  "ssense.",
+  "net-a-porter.",
+  "farfetch.",
+];
+const TRAVEL_DOMAIN_HINTS = [
+  "airbnb.",
+  "booking.",
+  "expedia.",
+  "hotels.",
+  "priceline.",
+  "tripadvisor.",
+  "vrbo.",
+  "marriott.",
+  "hilton.",
+  "hyatt.",
+];
+
+function inferPrimaryAction(url = "", domain = "") {
+  const cleanDomain = String(domain || "").toLowerCase();
+  const cleanUrl = String(url || "").toLowerCase();
+
+  if (
+    cleanDomain.includes("youtube.com") ||
+    cleanDomain.includes("youtu.be") ||
+    cleanUrl.includes("/watch")
+  ) {
+    return "watch";
+  }
+
+  if (cleanDomain.includes("github.com")) {
+    return "reference";
+  }
+
+  if (
+    TRAVEL_DOMAIN_HINTS.some((entry) => cleanDomain.includes(entry)) ||
+    cleanUrl.includes("/hotel") ||
+    cleanUrl.includes("/hotels") ||
+    cleanUrl.includes("/stay") ||
+    cleanUrl.includes("/rooms")
+  ) {
+    return "book";
+  }
+
+  if (
+    cleanUrl.includes("/product") ||
+    cleanUrl.includes("/prd/") ||
+    cleanUrl.includes("cart") ||
+    cleanUrl.includes("checkout") ||
+    ECOMMERCE_DOMAIN_HINTS.some((entry) => cleanDomain.includes(entry))
+  ) {
+    return "buy";
+  }
+
+  return "read";
+}
+
+function getSocialSourceAttribution(item) {
+  const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const sourceType = String(metadata.source || "").toLowerCase();
+  const sourceListId = metadata.source_list_id;
+  const sourceHandle = String(metadata.source_owner_handle || "")
+    .trim()
+    .replace(/^@+/, "");
+  const sourceListSlug = String(metadata.source_list_slug || "").trim();
+  const sourceListTitle = String(metadata.source_list_title || "").trim();
+
+  if (!sourceListId && sourceType !== "social_list") return null;
+
+  const ownerLabel = sourceHandle ? `@${sourceHandle}` : "another creator";
+  const listLabel = sourceListTitle || "a public list";
+  const listPath = sourceHandle && sourceListSlug ? `/@${sourceHandle}/${sourceListSlug}` : "";
+  const sourceKey = sourceListId || (sourceHandle && sourceListSlug ? `${sourceHandle}/${sourceListSlug}` : "");
+
+  return { ownerLabel, listLabel, listPath, sourceKey };
+}
 
 function normalizePrimaryAction(value) {
   const action = (value || "").toLowerCase();
@@ -413,6 +485,7 @@ export default function TripDetail() {
     updateTripState,
     enableShare,
     toggleItemPinned,
+    addItemToTrip,
     user,
     loading,
   } = useTrips();
@@ -450,6 +523,8 @@ export default function TripDetail() {
   const [pickWinnerSelection, setPickWinnerSelection] = useState("");
   const [ruledOutOpen, setRuledOutOpen] = useState(false);
   const [alternativesOpen, setAlternativesOpen] = useState(false);
+  const [addLinkInput, setAddLinkInput] = useState("");
+  const [addLinkLoading, setAddLinkLoading] = useState(false);
   const decisionScrollRef = useRef(null);
   const autoPickRef = useRef({ count: null });
 
@@ -666,7 +741,7 @@ export default function TripDetail() {
 
   const decisionStatus = trip?.decisionStatus || "none";
   const decisionDismissed = !!trip?.decisionDismissed;
-  const decisionItems = trip?.items || [];
+  const decisionItems = useMemo(() => trip?.items || [], [trip?.items]);
   const decisionActiveItems = useMemo(
     () =>
       decisionItems.filter(
@@ -721,6 +796,27 @@ export default function TripDetail() {
     });
     return groups;
   }, [filteredDisplayItems, groupByDomain]);
+
+  const collectionSourceAttribution = useMemo(() => {
+    const sourceMap = new Map();
+    for (const item of trip?.items || []) {
+      const source = getSocialSourceAttribution(item);
+      if (!source) continue;
+      const key = source.sourceKey || `${source.ownerLabel}|${source.listLabel}`;
+      if (!sourceMap.has(key)) {
+        sourceMap.set(key, source);
+      }
+    }
+
+    if (!sourceMap.size) return null;
+
+    const uniqueSources = Array.from(sourceMap.values());
+    if (uniqueSources.length === 1) {
+      return { type: "single", source: uniqueSources[0], count: 1 };
+    }
+
+    return { type: "multiple", count: uniqueSources.length };
+  }, [trip?.items]);
 
   const hasActiveFilters =
     !!searchText.trim() ||
@@ -885,17 +981,6 @@ export default function TripDetail() {
     setMentionFilter("");
   }
 
-  function handleSegmentKey(event) {
-    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-    const buttons = Array.from(event.currentTarget.querySelectorAll("button[role=\"tab\"]"));
-    const currentIndex = buttons.indexOf(event.target);
-    if (currentIndex === -1) return;
-    const delta = event.key === "ArrowRight" ? 1 : -1;
-    const nextIndex = (currentIndex + delta + buttons.length) % buttons.length;
-    buttons[nextIndex].focus();
-    buttons[nextIndex].click();
-  }
-
   function renderNoteArea(item) {
     const noteValue = item.note || "";
     const isExpanded = expandedNotes.has(item.id);
@@ -926,6 +1011,70 @@ export default function TripDetail() {
 
   function clearCompareSelection() {
     setCompareSelected(new Set());
+  }
+
+  async function handleAddLinkToCollection() {
+    if (!trip?.id || addLinkLoading) return;
+    const normalizedInput = normalizeUrl(addLinkInput);
+    if (!normalizedInput) {
+      setInlineErrorMessage("Paste a URL first.");
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(normalizedInput);
+    } catch {
+      setInlineErrorMessage("That doesn’t look like a valid URL.");
+      return;
+    }
+
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      setInlineErrorMessage("Only http/https URLs are supported.");
+      return;
+    }
+
+    const url = parsed.toString();
+    const normalizedIncoming = cleanAirbnbUrl(url);
+    const exists = (trip.items || []).some(
+      (item) => cleanAirbnbUrl(item?.url || item?.airbnbUrl || "") === normalizedIncoming
+    );
+    if (exists) {
+      setInlineErrorMessage("That link is already in this collection.");
+      return;
+    }
+
+    const domain = getDomain(url);
+    const endpoint = domain.includes("airbnb.") ? "/fetch-airbnb-title" : "/fetch-title";
+    const fallbackTitle = fallbackTitleForUrl(url);
+
+    setAddLinkLoading(true);
+    try {
+      const fetchedTitle = await fetchTitleWithTimeout(endpoint, url, 2600);
+      const decodedTitle = decodeHtmlEntities(fetchedTitle || "").trim();
+      const title = decodedTitle || fallbackTitle;
+      const insertedItem = await addItemToTrip(trip.id, {
+        title,
+        url,
+        airbnbUrl: url,
+        originalUrl: url,
+        domain,
+        platform: getPlatform(domain),
+        itemType: "link",
+        metadata: {},
+        addedAt: Date.now(),
+      });
+      if (!insertedItem) {
+        setInlineErrorMessage("Couldn’t add that link right now.");
+        return;
+      }
+      setAddLinkInput("");
+      setInlineToastMessage("Link added.");
+    } catch {
+      setInlineErrorMessage("Couldn’t add that link right now.");
+    } finally {
+      setAddLinkLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -1339,29 +1488,6 @@ export default function TripDetail() {
     }
   }
 
-  async function handleCopyItemUrl(item) {
-    if (!item?.airbnbUrl) return;
-    try {
-      await navigator.clipboard.writeText(item.airbnbUrl);
-    } catch {
-      setInlineErrorMessage("Couldn’t copy link. Try again.");
-    }
-  }
-
-  async function handleSystemShare() {
-    if (!shareUrlFinal || !navigator.share) return;
-    try {
-      await navigator.share({
-        title: trip?.name,
-        text: `${trip?.name || "Collection"} ${collectionShareLabel}`,
-        url: shareUrlFinal,
-      });
-      setShareOpen(false);
-    } catch {
-      // keep modal open if cancelled
-    }
-  }
-
   function renderListCard(item) {
     const titleParts = splitTitleParts(item.title, item.airbnbUrl);
     const { rating, chips } = splitMetaParts(titleParts.meta);
@@ -1377,7 +1503,9 @@ export default function TripDetail() {
     const isSelected = compareSelected.has(item.id);
     const disableSelect = compareSelected.size >= 4 && !isSelected;
     const isStale = isStaleItem(item);
-    const action = normalizePrimaryAction(item.primaryAction);
+    const action = normalizePrimaryAction(
+      item.primaryAction || inferPrimaryAction(item.airbnbUrl, domainLabel)
+    );
     const actionLabel = primaryActionLabel(action);
     const isChosen = item.decisionState === "chosen" || !!item.chosen;
 
@@ -1720,6 +1848,32 @@ export default function TripDetail() {
                 {linkCount} link{linkCount === 1 ? "" : "s"} · Updated {updatedAt} ·{" "}
                 {collectionSubtitle}
               </div>
+              {collectionSourceAttribution?.type === "single" && collectionSourceAttribution.source ? (
+                <div className="sourceAttributionRow collectionSourceAttribution">
+                  <span className="sourceAttributionLabel">From</span>
+                  <span className="sourceAttributionOwner">
+                    {collectionSourceAttribution.source.ownerLabel}
+                  </span>
+                  <span className="sourceAttributionDivider">•</span>
+                  {collectionSourceAttribution.source.listPath ? (
+                    <Link className="sourceAttributionLink" to={collectionSourceAttribution.source.listPath}>
+                      {collectionSourceAttribution.source.listLabel}
+                    </Link>
+                  ) : (
+                    <span className="sourceAttributionText">
+                      {collectionSourceAttribution.source.listLabel}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {collectionSourceAttribution?.type === "multiple" ? (
+                <div className="sourceAttributionRow collectionSourceAttribution">
+                  <span className="sourceAttributionLabel">From</span>
+                  <span className="sourceAttributionText">
+                    {collectionSourceAttribution.count} public lists
+                  </span>
+                </div>
+              ) : null}
               {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
                 <div className="sharedByLine">
                   Shared by {formatSharedBy(trip.ownerDisplayName)}
@@ -1749,6 +1903,32 @@ export default function TripDetail() {
               </div>
 
               <div className="toolbarRight" />
+            </div>
+
+            <div className="detailAddLinkRow">
+              <input
+                className="input detailAddLinkInput"
+                type="url"
+                placeholder="Paste a link to add directly to this collection"
+                value={addLinkInput}
+                onChange={(e) => setAddLinkInput(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleAddLinkToCollection();
+                  }
+                }}
+                disabled={addLinkLoading}
+                aria-label="Add link to collection"
+              />
+              <button
+                className="miniBtn detailAddLinkBtn"
+                type="button"
+                onClick={handleAddLinkToCollection}
+                disabled={addLinkLoading}
+              >
+                {addLinkLoading ? "Adding…" : "Add link"}
+              </button>
             </div>
 
             <div className="filterRow">
@@ -2232,7 +2412,9 @@ export default function TripDetail() {
                         fallbackMeta.chips
                       );
                       const isStale = isStaleItem(item);
-                      const action = normalizePrimaryAction(item.primaryAction);
+                      const action = normalizePrimaryAction(
+                        item.primaryAction || inferPrimaryAction(item.airbnbUrl, domainLabel)
+                      );
                       const actionLabel = primaryActionLabel(action);
                       const isChosen = item.decisionState === "chosen" || !!item.chosen;
                       return (

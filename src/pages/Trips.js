@@ -5,12 +5,14 @@ import pinIcon from "../assets/icons/pin (1).png";
 import whatsappIcon from "../assets/icons/whatsapp.png";
 import stashLogo from "../assets/icons/stash-favicon.png";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import CollectionCard from "../components/CollectionCard";
 import CollectionsIntroModal from "../components/CollectionsIntroModal";
+import PublishCollectionModal from "../components/PublishCollectionModal";
+import { getViewerProfile } from "../lib/publishedCollections";
 
 const CATEGORY_OPTIONS = ["general", "travel", "fashion"];
 const CATEGORY_PILLS = [
@@ -102,17 +104,15 @@ function IconTrash(props) {
   );
 }
 
-function formatLastUpdated(trip) {
-  const itemTimes = (trip.items || [])
-    .map((item) => item.addedAt || 0)
-    .filter(Boolean);
-  const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
+const LAST_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+});
+
+function formatLastUpdatedFromMs(latest) {
   if (!latest) return "recently";
-  return new Date(latest).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return LAST_UPDATED_FORMATTER.format(latest);
 }
 
 export default function Trips() {
@@ -122,7 +122,9 @@ export default function Trips() {
     deleteTrip,
     enableShare,
     toggleTripPinned,
+    updateTripCategory,
     renameTrip,
+    updateTripState,
     user,
     loading,
     localImportAvailable,
@@ -145,6 +147,8 @@ export default function Trips() {
   const [inlineSaving, setInlineSaving] = useState(false);
   const [inlinePulse, setInlinePulse] = useState(false);
   const [showCollectionsIntro, setShowCollectionsIntro] = useState(false);
+  const [publishTripId, setPublishTripId] = useState("");
+  const [profileHandle, setProfileHandle] = useState("");
   const ghostCardRef = useRef(null);
   const inlineCreateRef = useRef(null);
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
@@ -174,6 +178,22 @@ export default function Trips() {
     },
     [trips]
   );
+  const lastUpdatedByTripId = useMemo(() => {
+    const map = new Map();
+    for (const trip of trips) {
+      let latest = Date.parse(trip.createdAt || "") || 0;
+      for (const item of trip.items || []) {
+        const addedAt = Number(item?.addedAt || 0);
+        if (addedAt > latest) latest = addedAt;
+      }
+      map.set(trip.id, latest);
+    }
+    return map;
+  }, [trips]);
+  const formatLastUpdated = useCallback(
+    (trip) => formatLastUpdatedFromMs(lastUpdatedByTripId.get(trip.id) || 0),
+    [lastUpdatedByTripId]
+  );
   const sortedTrips = useMemo(
     () =>
       filteredTrips.slice().sort((a, b) => {
@@ -186,11 +206,15 @@ export default function Trips() {
         if (sortMode === "count") {
           return (b.items?.length || 0) - (a.items?.length || 0);
         }
-        const aTime = getLastUpdatedTime(a);
-        const bTime = getLastUpdatedTime(b);
+        const aTime = lastUpdatedByTripId.get(a.id) || 0;
+        const bTime = lastUpdatedByTripId.get(b.id) || 0;
         return bTime - aTime;
       }),
-    [filteredTrips, sortMode]
+    [filteredTrips, sortMode, lastUpdatedByTripId]
+  );
+  const publishTrip = useMemo(
+    () => trips.find((trip) => trip.id === publishTripId) || null,
+    [trips, publishTripId]
   );
   const nameInputRef = useRef(null);
 
@@ -202,13 +226,28 @@ export default function Trips() {
 
   useEffect(() => {
     if (typeof window === "undefined" || loading) return;
-    if (process.env.NODE_ENV !== "production") {
-      window.localStorage.removeItem("collectionsIntroDismissed");
+    if (!user?.id) {
+      setShowCollectionsIntro(false);
+      return;
     }
-    const dismissed = window.localStorage.getItem("collectionsIntroDismissed") === "true";
-    const shouldShow = !dismissed || trips.length === 0;
-    setShowCollectionsIntro(shouldShow);
-  }, [trips.length, loading]);
+
+    const introKey = `collectionsIntroDismissed:${user.id}`;
+    const legacyDismissed = window.localStorage.getItem("collectionsIntroDismissed") === "true";
+    if (legacyDismissed && window.localStorage.getItem(introKey) !== "true") {
+      window.localStorage.setItem(introKey, "true");
+    }
+
+    const dismissed = window.localStorage.getItem(introKey) === "true";
+    if (trips.length > 0) {
+      if (!dismissed) {
+        window.localStorage.setItem(introKey, "true");
+      }
+      setShowCollectionsIntro(false);
+      return;
+    }
+
+    setShowCollectionsIntro(!dismissed);
+  }, [trips.length, loading, user?.id]);
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -258,6 +297,23 @@ export default function Trips() {
     };
   }, [showInlineCreate]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadProfileHandle() {
+      if (!user?.id) {
+        if (active) setProfileHandle("");
+        return;
+      }
+      const { profile } = await getViewerProfile(user.id);
+      if (!active) return;
+      setProfileHandle(profile?.handle || "");
+    }
+    loadProfileHandle();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
   async function handleInlineCreate() {
     const trimmed = inlineName.trim();
     if (!trimmed || inlineSaving) {
@@ -289,12 +345,6 @@ export default function Trips() {
   function togglePin(trip) {
     toggleTripPinned(trip.id, !trip.pinned);
     setMenuOpenId("");
-  }
-
-  function getLastUpdatedTime(trip) {
-    const itemTimes = (trip.items || []).map((item) => item.addedAt || 0).filter(Boolean);
-    const latest = itemTimes.length > 0 ? Math.max(...itemTimes) : Date.parse(trip.createdAt || "");
-    return latest || 0;
   }
 
   async function handleRenameTrip(trip) {
@@ -341,13 +391,83 @@ export default function Trips() {
   }
 
   return (
-    <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+    <div className="page tripsPage collectionsShell collectionsIndexPage min-h-screen app-bg text-[rgb(var(--text))]">
+      <PublishCollectionModal
+        open={!!publishTrip}
+        trip={
+          publishTrip
+            ? {
+                id: publishTrip.id,
+                name: publishTrip.name,
+                subtitle: publishTrip.subtitle || "",
+                visibility: publishTrip.visibility || "private",
+                publicSlug: publishTrip.publicSlug || "",
+                isRanked: !!publishTrip.isRanked,
+                rankedSize: publishTrip.rankedSize ?? null,
+                coverImageUrl: publishTrip.coverImageUrl || "",
+                items: Array.isArray(publishTrip.items) ? publishTrip.items : [],
+              }
+            : null
+        }
+        viewerUserId={user?.id || ""}
+        initialHandle={profileHandle}
+        onHandleUpdated={(nextHandle) => setProfileHandle(nextHandle)}
+        onPublished={(collection, nextHandle, rankedItems = []) => {
+          const existingItems = Array.isArray(publishTrip?.items) ? publishTrip.items : [];
+          let nextItems = existingItems;
+
+          if (Array.isArray(rankedItems) && rankedItems.length > 0 && existingItems.length > 0) {
+            const byId = new Map(existingItems.map((item) => [item.id, item]));
+            const seen = new Set();
+            const reordered = rankedItems
+              .map((item) => {
+                const existing = byId.get(item.id);
+                if (!existing) return null;
+                seen.add(item.id);
+                return {
+                  ...existing,
+                  title: item.title || existing.title,
+                  note: item.note || "",
+                };
+              })
+              .filter(Boolean);
+            const remainder = existingItems.filter((item) => !seen.has(item.id));
+            nextItems = [...reordered, ...remainder];
+          }
+
+          if (nextHandle) {
+            setProfileHandle(nextHandle);
+          }
+          updateTripState(collection.id, {
+            name: collection.title,
+            subtitle: collection.subtitle || "",
+            visibility: collection.visibility,
+            publicSlug: collection.slug || "",
+            isRanked: !!collection.is_ranked,
+            rankedSize: collection.ranked_size ?? null,
+            coverImageUrl: collection.cover_image_url || "",
+            coverImageSource: collection.cover_image_source || "",
+            coverUpdatedAt: collection.cover_updated_at || null,
+            items: nextItems,
+          });
+          const publishToast =
+            collection.visibility === "public"
+              ? "Published to Explore"
+              : collection.visibility === "unlisted"
+              ? "Published as unlisted"
+              : "Publish settings saved";
+          setToastMsg(publishToast);
+          setTimeout(() => setToastMsg(""), 1700);
+          setPublishTripId("");
+        }}
+        onClose={() => setPublishTripId("")}
+      />
       <CollectionsIntroModal
         open={showCollectionsIntro}
         isEmpty={trips.length === 0}
         onClose={() => {
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem("collectionsIntroDismissed", "true");
+          if (typeof window !== "undefined" && user?.id) {
+            window.localStorage.setItem(`collectionsIntroDismissed:${user.id}`, "true");
           }
           setShowCollectionsIntro(false);
         }}
@@ -669,7 +789,22 @@ export default function Trips() {
                             setMenuOpenId((prev) => (prev === trip.id ? "" : trip.id))
                           }
                           onShare={() => openShare(trip)}
+                          onPublish={() => {
+                            setMenuOpenId("");
+                            setPublishTripId(trip.id);
+                          }}
                           onTogglePin={() => togglePin(trip)}
+                          onChangeSection={async (nextSection) => {
+                            setMenuOpenId("");
+                            const ok = await updateTripCategory(trip.id, nextSection);
+                            if (!ok) {
+                              setToastMsg("Could not move collection right now");
+                              setTimeout(() => setToastMsg(""), 1700);
+                              return;
+                            }
+                            setToastMsg(`Moved to ${nextSection.charAt(0).toUpperCase()}${nextSection.slice(1)}`);
+                            setTimeout(() => setToastMsg(""), 1700);
+                          }}
                           onDelete={() => {
                             setMenuOpenId("");
                             deleteTrip(trip.id);

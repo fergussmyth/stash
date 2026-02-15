@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const AuthContext = createContext(null);
@@ -22,20 +22,23 @@ export function AuthProvider({ children }) {
     return window.localStorage.getItem("stashSoftLogout") === "true";
   });
 
-  const buildRememberedProfile = (currentUser = user) => {
-    if (!currentUser) return null;
-    return {
-      id: currentUser.id,
-      email: currentUser.email ?? "",
-      name:
-        currentUser.user_metadata?.display_name ||
-        currentUser.user_metadata?.full_name ||
-        currentUser.user_metadata?.name ||
-        currentUser.user_metadata?.username ||
-        (currentUser.email ? currentUser.email.split("@")[0] : "User"),
-      avatar_url: currentUser.user_metadata?.avatar_url || "",
-    };
-  };
+  const buildRememberedProfile = useCallback(
+    (currentUser = user) => {
+      if (!currentUser) return null;
+      return {
+        id: currentUser.id,
+        email: currentUser.email ?? "",
+        name:
+          currentUser.user_metadata?.display_name ||
+          currentUser.user_metadata?.full_name ||
+          currentUser.user_metadata?.name ||
+          currentUser.user_metadata?.username ||
+          (currentUser.email ? currentUser.email.split("@")[0] : "User"),
+        avatar_url: currentUser.user_metadata?.avatar_url || "",
+      };
+    },
+    [user]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -76,7 +79,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!user) return;
-    const payload = { id: user.id, email: user.email ?? null };
+    const payload = { id: user.id };
     const metadataDisplayName = user.user_metadata?.display_name;
     if (metadataDisplayName) {
       payload.display_name = metadataDisplayName;
@@ -128,35 +131,38 @@ export function AuthProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [buildRememberedProfile, user]);
 
-  const rememberCurrentUser = (currentUser = user) => {
-    if (!currentUser || typeof window === "undefined") return;
-    const profile = buildRememberedProfile(currentUser);
-    if (!profile) return;
+  const rememberCurrentUser = useCallback(
+    (currentUser = user) => {
+      if (!currentUser || typeof window === "undefined") return;
+      const profile = buildRememberedProfile(currentUser);
+      if (!profile) return;
 
-    window.localStorage.setItem("stashRememberedProfile", JSON.stringify(profile));
-    setRememberedProfile(profile);
-  };
+      window.localStorage.setItem("stashRememberedProfile", JSON.stringify(profile));
+      setRememberedProfile(profile);
+    },
+    [buildRememberedProfile, user]
+  );
 
-  const clearRememberedProfile = () => {
+  const clearRememberedProfile = useCallback(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("stashRememberedProfile");
       window.localStorage.setItem("stashRememberMe", "false");
       window.localStorage.removeItem("stashSoftLogout");
     }
     setRememberedProfile(null);
-  };
+  }, []);
 
-  const softLogout = () => {
+  const softLogout = useCallback(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("stashSoftLogout", "true");
     }
     setSoftLoggedOut(true);
     setUser(null);
-  };
+  }, []);
 
-  const resumeSession = () => {
+  const resumeSession = useCallback(() => {
     if (!sessionUser) return false;
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("stashSoftLogout");
@@ -164,7 +170,7 @@ export function AuthProvider({ children }) {
     setSoftLoggedOut(false);
     setUser(sessionUser);
     return true;
-  };
+  }, [sessionUser]);
 
   const value = useMemo(
     () => ({
@@ -176,7 +182,15 @@ export function AuthProvider({ children }) {
       softLogout,
       resumeSession,
     }),
-    [user, loading, rememberedProfile, sessionUser, softLoggedOut]
+    [
+      user,
+      loading,
+      rememberedProfile,
+      rememberCurrentUser,
+      clearRememberedProfile,
+      softLogout,
+      resumeSession,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

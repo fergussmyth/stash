@@ -5,6 +5,9 @@ import { LoginForm } from "./Login";
 import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
+import TrendingListCard from "../components/TrendingListCard";
+import { fetchFollowingFeed, fetchTrendingLists } from "../lib/socialDiscovery";
+import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
 
@@ -121,6 +124,49 @@ function getPlatform(domain) {
   return "";
 }
 
+function isAirbnbItem(item) {
+  const domain = String(item?.domain || "").toLowerCase();
+  const url = String(item?.url || item?.originalUrl || item?.airbnbUrl || "").toLowerCase();
+  return domain.includes("airbnb.") || url.includes("airbnb.");
+}
+
+function isAirbnbFallbackTitle(title = "") {
+  return /^airbnb room(?:\s+\d+)?$/i.test(String(title || "").trim());
+}
+
+function sanitizeAirbnbTitleForHome(input = "") {
+  let title = String(input || "").trim();
+  if (!title) return "";
+
+  title = title.replace(/\s*[-|]\s*airbnb\s*$/i, "").trim();
+  title = title.split(/\s[·•]\s/)[0].trim();
+  title = title.split(/\s\|\s/)[0].trim();
+
+  const metadataStart = title.search(
+    /\s(?:[⭐★]|(?:\d+(?:\.\d+)?)\s*(?:stars?|rating)|\d+\s*(?:beds?|bedrooms?|bath(?:room)?s?|guests?)|entire\s|private\s+room|shared\s+room|superhost\b)/i
+  );
+  if (metadataStart > 0) {
+    title = title.slice(0, metadataStart).trim();
+  }
+
+  title = title.replace(/\s*[,|•·-]\s*$/, "").trim();
+  return title;
+}
+
+function recentTitleForItem(item) {
+  const rawTitle = String(item?.title || "").trim();
+  if (!rawTitle) return item?.domain || "Stashed link";
+
+  let title = rawTitle.replace(/\s*[-|]\s*airbnb\s*$/i, "").trim();
+
+  // Airbnb pages often append metadata like rating/bedrooms using separators.
+  if (isAirbnbItem(item)) {
+    title = sanitizeAirbnbTitleForHome(title);
+  }
+
+  return title || item?.domain || "Stashed link";
+}
+
 function decodeHtmlEntities(text = "") {
   if (!text) return "";
   if (typeof document === "undefined") return text;
@@ -130,26 +176,41 @@ function decodeHtmlEntities(text = "") {
 }
 
 async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  async function postJsonWithTimeout(path, body, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      return await response.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-      signal: controller.signal,
-    });
-    const data = await res.json();
-    return data?.title || null;
+    const data = await postJsonWithTimeout(endpoint, { url }, timeoutMs);
+    const title = String(data?.title || "").trim();
+    if (title) return title;
+
+    const previewData = await postJsonWithTimeout("/fetch-link-preview", { url }, timeoutMs + 2000);
+    const previewTitle = String(previewData?.title || "").trim();
+    return previewTitle || null;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
+const FEED_PAGE_SIZE = 12;
+
 export default function Home() {
-  const { trips, createTrip, addItemToTrip, removeItem, user } = useTrips();
+  const { trips, createTrip, addItemToTrip, removeItem, user, deleteTrip, reloadTripItems } = useTrips();
   const textareaRef = useRef(null);
   const navigate = useNavigate();
 
@@ -159,7 +220,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [autoRedirect, setAutoRedirect] = useState(false);
-  const [hasAttempted, setHasAttempted] = useState(false);
+  const [, setHasAttempted] = useState(false);
 
   // Trips UI
   const [selectedTripId, setSelectedTripId] = useState("");
@@ -167,8 +228,7 @@ export default function Home() {
   const [savedMsg, setSavedMsg] = useState("");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
-  const [linksFound, setLinksFound] = useState(0);
-  const [lastSavedTripId, setLastSavedTripId] = useState("");
+  const [, setLinksFound] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingCreateRef = useRef(false);
   const [autoExtractPending, setAutoExtractPending] = useState(false);
@@ -177,6 +237,16 @@ export default function Home() {
   const [stashFocusArmed, setStashFocusArmed] = useState(false);
   const stashWrapRef = useRef(null);
   const stashInputRef = useRef(null);
+  const [feedLists, setFeedLists] = useState([]);
+  const [feedMode, setFeedMode] = useState("following");
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const [feedHasMore, setFeedHasMore] = useState(false);
+  const [feedError, setFeedError] = useState("");
+  const [feedSaveStateByListId, setFeedSaveStateByListId] = useState({});
+  const feedRequestRef = useRef(0);
+  const recentTitleCacheRef = useRef(new Map());
+  const [resolvedRecentTitlesByItemId, setResolvedRecentTitlesByItemId] = useState({});
 
   const pendingTripKey = "pending_trip_create_name";
   const pendingTripTypeKey = "pending_trip_create_type";
@@ -269,7 +339,7 @@ export default function Home() {
   const previewCount = link ? 1 : bulkLinks.length;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showAllPreview, setShowAllPreview] = useState(false);
-  const [prefsOpen, setPrefsOpen] = useState(true);
+  const [prefsOpen, setPrefsOpen] = useState(false);
   const recentItems = useMemo(() => {
     const items = trips.flatMap((trip) =>
       (trip.items || []).map((item) => ({
@@ -282,6 +352,51 @@ export default function Home() {
       .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
       .slice(0, 5);
   }, [trips]);
+
+  useEffect(() => {
+    let active = true;
+
+    const candidates = recentItems
+      .filter((item) => isAirbnbItem(item))
+      .map((item) => {
+        const displayTitle = recentTitleForItem(item);
+        if (!isAirbnbFallbackTitle(displayTitle)) return null;
+        const url = cleanUrl(item.url || item.originalUrl || item.airbnbUrl || "");
+        if (!url) return null;
+        return { id: item.id, url, currentTitle: displayTitle };
+      })
+      .filter(Boolean);
+
+    if (!candidates.length) return () => { active = false; };
+
+    (async () => {
+      const nextResolved = {};
+
+      for (const candidate of candidates) {
+        const cached = recentTitleCacheRef.current.get(candidate.url);
+        if (typeof cached === "string") {
+          if (cached) nextResolved[candidate.id] = cached;
+          continue;
+        }
+
+        const fetched =
+          (await fetchTitleWithTimeout("/fetch-airbnb-title", candidate.url, 4500)) ||
+          (await fetchTitleWithTimeout("/fetch-link-preview", candidate.url, 5000));
+        const decoded = sanitizeAirbnbTitleForHome(
+          decodeHtmlEntities(String(fetched || "").trim())
+        );
+        recentTitleCacheRef.current.set(candidate.url, decoded || "");
+        if (decoded) nextResolved[candidate.id] = decoded;
+      }
+
+      if (!active || !Object.keys(nextResolved).length) return;
+      setResolvedRecentTitlesByItemId((prev) => ({ ...prev, ...nextResolved }));
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [recentItems]);
 
   useEffect(() => {
     if (hasPreviewItems) {
@@ -313,18 +428,317 @@ export default function Home() {
     return tripsForSelect.find((trip) => (trip.name || "").toLowerCase() === query) || null;
   }, [stashQuery, tripsForSelect]);
 
-  function resetAll() {
-    setComment("");
-    setLink("");
-    setLinkMeta(null);
-    setError("");
-    setWarning("");
-    setHasAttempted(false);
-    setSavedMsg("");
-    setBulkLinks([]);
-    setSelectedIds(new Set());
-    setLinksFound(0);
-    setLastSavedTripId("");
+  const feedTitle = feedMode === "following" ? "From people you follow" : "Trending now";
+  const feedSub =
+    feedMode === "following"
+      ? "Newest public lists from creators you follow."
+      : "No followed activity yet, so these are trending this week.";
+  const showTrendingCarousel = feedMode === "trending";
+
+  function mergeUniqueLists(prevRows, nextRows) {
+    const seen = new Set(prevRows.map((row) => row.id));
+    const merged = [...prevRows];
+    for (const row of nextRows) {
+      if (!row?.id || seen.has(row.id)) continue;
+      seen.add(row.id);
+      merged.push(row);
+    }
+    return merged;
+  }
+
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const requestId = feedRequestRef.current + 1;
+    feedRequestRef.current = requestId;
+
+    if (!viewerUserId) {
+      setFeedLists([]);
+      setFeedMode("following");
+      setFeedLoading(false);
+      setFeedLoadingMore(false);
+      setFeedHasMore(false);
+      setFeedError("");
+      return () => {
+        active = false;
+      };
+    }
+
+    setFeedLoading(true);
+    setFeedLoadingMore(false);
+    setFeedError("");
+
+    (async () => {
+      const followingResult = await fetchFollowingFeed({
+        viewerUserId,
+        limit: FEED_PAGE_SIZE,
+        offset: 0,
+      });
+
+      if (!active || feedRequestRef.current !== requestId) return;
+      const followingLists = followingResult.lists || [];
+      if (followingLists.length > 0) {
+        setFeedMode("following");
+        setFeedLists(followingLists);
+        setFeedHasMore(!!followingResult.hasMore);
+        setFeedLoading(false);
+        return;
+      }
+
+      const trendingResult = await fetchTrendingLists({
+        section: "all",
+        search: "",
+        limit: FEED_PAGE_SIZE,
+        offset: 0,
+      });
+
+      if (!active || feedRequestRef.current !== requestId) return;
+      setFeedMode("trending");
+      setFeedLists(trendingResult.lists || []);
+      setFeedHasMore(!!trendingResult.hasMore);
+      setFeedLoading(false);
+      if (followingResult.error) {
+        setFeedError("Could not load followed activity. Showing trending.");
+      }
+    })().catch(() => {
+      if (!active || feedRequestRef.current !== requestId) return;
+      setFeedLists([]);
+      setFeedHasMore(false);
+      setFeedLoading(false);
+      setFeedError("Could not load your feed right now.");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let active = true;
+    const viewerUserId = user?.id || "";
+    const ids = [...new Set((feedLists || []).map((row) => row.id).filter(Boolean))];
+    if (!viewerUserId || !ids.length) {
+      if (!viewerUserId) {
+        setFeedSaveStateByListId({});
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    getSavedListsByIds({ viewerUserId, listIds: ids }).then(({ map }) => {
+      if (!active) return;
+      setFeedSaveStateByListId((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          const existing = next[id] || {};
+          if (existing.saving) continue;
+          next[id] = {
+            saved: map.has(id),
+            savedTripId: map.get(id)?.savedTripId || "",
+            saving: false,
+          };
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, feedLists]);
+
+  async function loadMoreFeed() {
+    const viewerUserId = user?.id || "";
+    if (!viewerUserId || !feedHasMore || feedLoading || feedLoadingMore) return;
+    setFeedLoadingMore(true);
+    setFeedError("");
+    const offset = feedLists.length;
+
+    try {
+      const result =
+        feedMode === "following"
+          ? await fetchFollowingFeed({
+              viewerUserId,
+              limit: FEED_PAGE_SIZE,
+              offset,
+            })
+          : await fetchTrendingLists({
+              section: "all",
+              search: "",
+              limit: FEED_PAGE_SIZE,
+              offset,
+            });
+
+      if (result.error) {
+        setFeedError("Could not load more right now.");
+        setFeedLoadingMore(false);
+        return;
+      }
+
+      setFeedLists((prev) => mergeUniqueLists(prev, result.lists || []));
+      setFeedHasMore(!!result.hasMore);
+      setFeedLoadingMore(false);
+    } catch {
+      setFeedLoadingMore(false);
+      setFeedError("Could not load more right now.");
+    }
+  }
+
+  async function viewFeedSavedList(list) {
+    const listId = list?.id || "";
+    if (!listId) return;
+    const savedTripId = feedSaveStateByListId[listId]?.savedTripId || "";
+    if (savedTripId) {
+      navigate(`/trips/${savedTripId}`);
+      return;
+    }
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+    if (feedSaveStateByListId[listId]?.saving) return;
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: true,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved" || result.status === "already_saved") {
+      const nextTripId = result.savedTripId || "";
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: nextTripId,
+          saving: false,
+        },
+      }));
+      if (result.status === "saved" && result.insertedSaveRow) {
+        setFeedLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      if (nextTripId) {
+        navigate(`/trips/${nextTripId}`);
+        return;
+      }
+      navigate("/trips");
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToastMsg(result.message || "Couldn’t open saved copy.");
+    setTimeout(() => setToastMsg(""), 1800);
+    navigate("/trips");
+  }
+
+  async function handleSaveFeedList(list) {
+    if (!list?.id) return;
+    const listId = list.id;
+    if (!user?.id) {
+      navigate("/login");
+      return;
+    }
+
+    const state = feedSaveStateByListId[listId] || {};
+    if (state.saving) return;
+    if (state.saved) {
+      await viewFeedSavedList(list);
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: true,
+      },
+    }));
+
+    const result = await savePublicListToStash({
+      viewerUserId: user.id,
+      list,
+      ownerHandle: list.owner_handle || "",
+      createTrip,
+      deleteTrip,
+      reloadTripItems,
+    });
+
+    if (result.status === "saved") {
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      if (result.insertedSaveRow) {
+        setFeedLists((prev) =>
+          prev.map((row) =>
+            row.id === listId
+              ? { ...row, save_count: Number(row.save_count || 0) + 1 }
+              : row
+          )
+        );
+      }
+      setToastMsg("Saved to your Stash");
+      setTimeout(() => setToastMsg(""), 1700);
+      return;
+    }
+
+    if (result.status === "already_saved") {
+      setFeedSaveStateByListId((prev) => ({
+        ...prev,
+        [listId]: {
+          saved: true,
+          savedTripId: result.savedTripId || "",
+          saving: false,
+        },
+      }));
+      setToastMsg("Already saved");
+      setTimeout(() => setToastMsg(""), 1600);
+      return;
+    }
+
+    setFeedSaveStateByListId((prev) => ({
+      ...prev,
+      [listId]: {
+        saved: false,
+        savedTripId: "",
+        ...(prev[listId] || {}),
+        saving: false,
+      },
+    }));
+    setToastMsg(result.message || "Couldn’t save right now.");
+    setTimeout(() => setToastMsg(""), 1800);
   }
 
   function clearSinglePreview() {
@@ -449,7 +863,6 @@ export default function Home() {
     setSelectedIds(new Set());
     setLinkMeta(null);
     setLinksFound(0);
-    setLastSavedTripId("");
 
     // Find ALL links in the pasted text
     const matches = extractLinksFromText(comment);
@@ -595,13 +1008,17 @@ export default function Home() {
             actions={
               <>
                 {user ? (
-                  <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
-                    <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
-                  </Link>
+                  <>
+                    <Link className="topbarIconBtn" to="/profile" aria-label="Profile">
+                      <img className="topbarAvatar homeAvatar" src={userIcon} alt="" aria-hidden="true" />
+                    </Link>
+                  </>
                 ) : (
-                  <Link className="topbarPill subtle" to="/login">
-                    Sign in
-                  </Link>
+                  <>
+                    <Link className="topbarPill subtle" to="/login">
+                      Sign in
+                    </Link>
+                  </>
                 )}
               </>
             }
@@ -752,7 +1169,6 @@ export default function Home() {
                       }
                       if (!targetId) return;
                       if (link) {
-                        setLastSavedTripId(targetId);
                         await saveSingleToTrip(targetId);
                       } else {
                         saveBulkToTrip(targetId);
@@ -770,14 +1186,13 @@ export default function Home() {
 
             <div className="homeSettingsCard">
               <div className="homePrefs">
-                <div className="optionsLabel">Preferences</div>
                 <button
                   className="prefsToggle"
                   type="button"
                   onClick={() => setPrefsOpen((prev) => !prev)}
                   aria-expanded={prefsOpen}
                 >
-                  Settings
+                  Preferences
                   <span className={`prefsChevron ${prefsOpen ? "open" : ""}`} aria-hidden="true" />
                 </button>
                 {prefsOpen && (
@@ -895,16 +1310,93 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="homeRecent">
-              <div className="homeRecentLabel">
-                Recently stashed ({recentItems.length})
-              </div>
-              <div className="homeRecentList">
-                {recentItems.length === 0 ? (
-                  <div className="homeRecentEmpty">No recent items yet.</div>
+            {user ? (
+              <div className="homeFeed">
+                <div className="homeFeedHead">
+                  <div className="homeRecentLabel">Your feed</div>
+                  <div className="homeFeedCopy">
+                    <div className="listTitle">{feedTitle}</div>
+                    <div className="fieldHelp">{feedSub}</div>
+                  </div>
+                </div>
+
+                {feedError ? <div className="warning">{feedError}</div> : null}
+
+                {feedLoading ? (
+                  <div
+                    className={
+                      showTrendingCarousel
+                        ? "trendingRow homeFeedGrid skeletonRow"
+                        : "collectionsGrid homeFeedGrid"
+                    }
+                  >
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <div key={index} className="trendingListSkeleton" />
+                    ))}
+                  </div>
+                ) : feedLists.length === 0 ? (
+                  <div className="collectionsEmpty">
+                    <div className="collectionsEmptyIcon" aria-hidden="true">
+                      ✦
+                    </div>
+                    <div className="collectionsEmptyTitle">No lists in your feed yet</div>
+                    <div className="collectionsEmptyText">
+                      Follow creators or explore trending lists.
+                    </div>
+                    <div className="navRow">
+                      <Link className="miniBtn linkBtn" to="/explore">
+                        Open Explore
+                      </Link>
+                    </div>
+                  </div>
                 ) : (
-                  recentItems.map((item) => (
-                    <div key={item.id} className="homeRecentItem">
+                  <>
+                    <div
+                      className={
+                        showTrendingCarousel
+                          ? "trendingRow homeFeedGrid"
+                          : "collectionsGrid homeFeedGrid"
+                      }
+                    >
+                      {feedLists.map((list) => (
+                        <TrendingListCard
+                          key={list.id}
+                          list={list}
+                          handle={list.owner_handle}
+                          isSaved={!!feedSaveStateByListId[list.id]?.saved}
+                          isSaving={!!feedSaveStateByListId[list.id]?.saving}
+                          onSave={() => handleSaveFeedList(list)}
+                        />
+                      ))}
+                    </div>
+                    {feedHasMore ? (
+                      <div className="exploreLoadMoreRow">
+                        <button
+                          className="miniBtn blue"
+                          type="button"
+                          onClick={loadMoreFeed}
+                          disabled={feedLoadingMore}
+                        >
+                          {feedLoadingMore ? "Loading…" : "Load more"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            <div className="homeRecent">
+              <div className="homeRecentHead">
+                <div className="homeRecentLabel">Recently stashed ({recentItems.length})</div>
+                {recentItems.length > 1 ? <div className="homeRecentHint">Swipe</div> : null}
+              </div>
+              {recentItems.length === 0 ? (
+                <div className="homeRecentEmpty">No recent items yet.</div>
+              ) : (
+                <div className="homeRecentCarousel" role="list" aria-label="Recently stashed links">
+                  {recentItems.map((item) => (
+                    <div key={item.id} className="homeRecentItem" role="listitem">
                       <div className="homeRecentIcon">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path
@@ -925,7 +1417,7 @@ export default function Home() {
                       </div>
                       <div className="homeRecentMeta">
                         <div className="homeRecentTitle">
-                          {item.title || item.domain || "Stashed link"}
+                          {resolvedRecentTitlesByItemId[item.id] || recentTitleForItem(item)}
                         </div>
                         <div className="homeRecentSub">
                           {item.url || item.originalUrl || item.domain || "—"}
@@ -987,9 +1479,9 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         </div>

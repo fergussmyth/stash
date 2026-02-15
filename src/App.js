@@ -1,18 +1,31 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
-import Home from "./pages/Home";
-import Trips from "./pages/Trips";
-import TripDetail from "./pages/TripDetail";
-import ShareTrip from "./pages/ShareTrip";
-import Review from "./pages/Review";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { Suspense, lazy, useState, useEffect } from "react";
 import { TripsProvider } from "./hooks/useTrips";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
-import Login from "./pages/Login";
-import Profile from "./pages/Profile";
-import ExtensionSettings from "./pages/ExtensionSettings";
 import userIcon from "./assets/icons/user.png";
 import stashLogo from "./assets/icons/stash-favicon.png";
 import { supabase } from "./lib/supabaseClient";
+
+const Home = lazy(() => import("./pages/Home"));
+const Trips = lazy(() => import("./pages/Trips"));
+const TripDetail = lazy(() => import("./pages/TripDetail"));
+const ShareTrip = lazy(() => import("./pages/ShareTrip"));
+const Review = lazy(() => import("./pages/Review"));
+const Login = lazy(() => import("./pages/Login"));
+const Profile = lazy(() => import("./pages/Profile"));
+const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
+const PublicProfile = lazy(() => import("./pages/PublicProfile"));
+const PublicList = lazy(() => import("./pages/PublicList"));
+const Explore = lazy(() => import("./pages/Explore"));
+const ExtensionSettings = lazy(() => import("./pages/ExtensionSettings"));
 
 function AppShell() {
   const location = useLocation();
@@ -31,14 +44,19 @@ function AppShell() {
     location.pathname === "/trips" ||
     location.pathname.startsWith("/trips/") ||
     location.pathname === "/review" ||
-    location.pathname === "/profile" ||
+    location.pathname.startsWith("/profile") ||
+    location.pathname === "/explore" ||
+    location.pathname.startsWith("/lists") ||
+    location.pathname.startsWith("/@") ||
     location.pathname === "/" ||
     location.pathname === "/login";
 
   const publicOnly =
     location.pathname === "/" ||
     location.pathname === "/login" ||
-    location.pathname.startsWith("/share/");
+    location.pathname.startsWith("/share/") ||
+    location.pathname === "/explore" ||
+    location.pathname.startsWith("/@");
 
   const showAuthGate = !loading && !user && !publicOnly;
 
@@ -222,16 +240,25 @@ function AppShell() {
         </div>
       )}
 
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/trips" element={<Trips />} />
-        <Route path="/trips/:id" element={<TripDetail />} />
-        <Route path="/review" element={<Review />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/settings/extension" element={<ExtensionSettings />} />
-        <Route path="/share/:shareId" element={<ShareTrip />} />
-      </Routes>
+      <Suspense fallback={null}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/trips" element={<Trips />} />
+          <Route path="/trips/:id" element={<TripDetail />} />
+          <Route path="/review" element={<Review />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/profile/settings" element={<ProfileSettings />} />
+          <Route path="/explore" element={<Explore />} />
+          <Route path="/lists" element={<Navigate to="/trips" replace />} />
+          <Route path="/lists/new" element={<Navigate to="/trips" replace />} />
+          <Route path="/lists/:id/edit" element={<Navigate to="/trips" replace />} />
+          <Route path="/:handle/:listSlug" element={<PublicList />} />
+          <Route path="/:handle" element={<PublicProfile />} />
+          <Route path="/settings/extension" element={<ExtensionSettings />} />
+          <Route path="/share/:shareId" element={<ShareTrip />} />
+        </Routes>
+      </Suspense>
     </>
   );
 }
