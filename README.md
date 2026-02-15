@@ -1,24 +1,65 @@
 # Stash
 
-A clean way to save links while you browse.
-
+Save anything online.  
+Organise it.  
+Share it when it matters.
 
 ![showcase](docs/assets/app-showcase.png)
 
-## What it does
-- Save Airbnb links from pasted text (including short/slink URLs) or the browser extension.
-- Organize links into collections with titles, notes, tags, and cover images.
-- Review listings in a decision workspace with shortlist and chosen states.
-- Bulk selection, auto-open control, and duplicate detection.
-- Compare up to 4 listings side-by-side and resolve decision groups.
-- Share read-only collection links with friends.
+---
 
-## Chrome extension (start here)
-Stash lives in the browser so you can save a page the moment you see it.
+## What Stash Is
+
+Stash is a clean, decision-focused saving platform.
+
+It lets you save links from anywhere online — fashion, travel, products, ideas — organise them into structured collections, compare options side-by-side, and share curated collections with others.
+
+It’s not just a bookmark tool.  
+It’s a workspace for making better decisions.
+
+---
+
+## Core Features
+
+### 🔖 Save Anything
+- Paste any link from social media, shopping sites, travel platforms, or articles
+- Save directly from the Chrome extension
+- Automatic duplicate detection
+- Smart cover image generation (with graceful fallbacks)
+
+### 📚 Structured Collections
+- Organise into categories (Fashion / Travel / General)
+- Create focused collections (e.g. “Dresses for Prom”, “Portugal Trip”, “New Monitor”)
+- Add titles, notes, tags, and cover images
+- Clean dark UI with consistent design system
+
+### ⚖️ Decision Workspace
+- Shortlist and chosen states
+- Group similar items automatically for comparisons
+- Compare up to 4 items side-by-side
+- Resolve comparison groups once a decision is made
+
+### 🌍 Social & Sharing
+- Share read-only collection links
+- Clean public collection view
+- Foundations for Explore and social discovery
+
+---
+
+## Chrome Extension
+
+Stash lives in your browser so you can save something the moment you see it.
 
 ![extension showcase](docs/assets/extension-showcase.png)
 
-## Run locally
+- One-click saving
+- Instant collection selection
+- Works alongside the main web app
+
+---
+
+## Run Locally
+
 From the project root:
 
 ```bash
@@ -31,6 +72,7 @@ npm install
 
 # Start server (API on http://localhost:5000)
 npm start
+
 ```
 
 In another terminal:
