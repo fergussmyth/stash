@@ -114,6 +114,71 @@ function decodeHtmlEntities(text = "") {
   return el.value;
 }
 
+function parseMetaObject(meta) {
+  if (!meta) return null;
+  if (typeof meta === "object") return meta;
+  try {
+    return JSON.parse(String(meta));
+  } catch {
+    return null;
+  }
+}
+
+function firstNonEmpty(values = []) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function extractImageFromMeta(meta) {
+  const parsed = parseMetaObject(meta);
+  if (!parsed || typeof parsed !== "object") return "";
+
+  const direct = firstNonEmpty([
+    parsed.image,
+    parsed.image_url,
+    parsed.imageUrl,
+    parsed.preview_image,
+    parsed.previewImage,
+    parsed.thumbnail,
+    parsed.thumbnail_url,
+    parsed.thumbnailUrl,
+    parsed.photo,
+    parsed.photo_url,
+    parsed.photoUrl,
+    parsed.og_image,
+    parsed.ogImage,
+  ]);
+  if (direct) return direct;
+
+  if (Array.isArray(parsed.images)) {
+    for (const image of parsed.images) {
+      if (typeof image === "string" && image.trim()) return image.trim();
+      if (image && typeof image === "object") {
+        const nested = firstNonEmpty([image.url, image.src, image.image, image.image_url]);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  if (parsed.og && typeof parsed.og === "object") {
+    const ogImage = firstNonEmpty([parsed.og.image, parsed.og.image_url, parsed.og.imageUrl]);
+    if (ogImage) return ogImage;
+  }
+
+  return "";
+}
+
+function resolveItemPreviewImage(item = {}) {
+  const direct = firstNonEmpty([item.imageUrl, item.image_url]);
+  if (direct) return direct;
+  const fromMeta = extractImageFromMeta(item.metadata);
+  if (fromMeta) return fromMeta;
+  return firstNonEmpty([item.faviconUrl, item.favicon_url]);
+}
+
 async function fetchTitleWithTimeout(endpoint, url, timeoutMs = 2600) {
   async function postJsonWithTimeout(path, body, ms) {
     const controller = new AbortController();
@@ -428,7 +493,16 @@ function formatCollectionUpdatedAt(trip) {
   });
 }
 
-function CollectionCoverHeader({ trip, onShare, showShare }) {
+function CollectionCoverHeader({
+  trip,
+  onShare,
+  showShare,
+  backTo,
+  collectionSubtitle,
+  updatedAt,
+  linkCount,
+  collectionSourceAttribution,
+}) {
   const [coverLoaded, setCoverLoaded] = useState(false);
   const coverSeed = useMemo(() => `${trip?.id || ""}-${trip?.name || ""}`, [trip?.id, trip?.name]);
   const fallbackGradient = useMemo(() => makeCoverGradient(coverSeed), [coverSeed]);
@@ -456,16 +530,61 @@ function CollectionCoverHeader({ trip, onShare, showShare }) {
         />
       )}
       <div className="detailCoverOverlay" aria-hidden="true" />
-      <div className="detailCoverActions">
-        {showShare && (
-          <button
-            className="coverActionBtn"
-            type="button"
-            onClick={onShare}
-            aria-label="Share collection"
-          >
-            <img className="iconImg" src={shareIcon} alt="" />
-          </button>
+      <div className="detailCoverTopRow">
+        <Link className="detailCoverBackLink" to={backTo}>
+          <span aria-hidden="true">←</span>
+          <span>Collections</span>
+        </Link>
+        <div className="detailCoverActions">
+          {showShare && (
+            <button
+              className="coverActionBtn"
+              type="button"
+              onClick={onShare}
+              aria-label="Share collection"
+            >
+              <img className="iconImg" src={shareIcon} alt="" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="detailCoverBody">
+        <div className="detailCoverTitle">{trip?.name}</div>
+        <div className="detailCoverSubtitle">{collectionSubtitle}</div>
+        <div className="detailCoverMeta">
+          {linkCount} link{linkCount === 1 ? "" : "s"} · Updated {updatedAt} ·{" "}
+          {collectionSubtitle}
+        </div>
+        {collectionSourceAttribution?.type === "single" && collectionSourceAttribution.source ? (
+          <div className="sourceAttributionRow collectionSourceAttribution">
+            <span className="sourceAttributionLabel">From</span>
+            <span className="sourceAttributionOwner">
+              {collectionSourceAttribution.source.ownerLabel}
+            </span>
+            <span className="sourceAttributionDivider">•</span>
+            {collectionSourceAttribution.source.listPath ? (
+              <Link className="sourceAttributionLink" to={collectionSourceAttribution.source.listPath}>
+                {collectionSourceAttribution.source.listLabel}
+              </Link>
+            ) : (
+              <span className="sourceAttributionText">
+                {collectionSourceAttribution.source.listLabel}
+              </span>
+            )}
+          </div>
+        ) : null}
+        {collectionSourceAttribution?.type === "multiple" ? (
+          <div className="sourceAttributionRow collectionSourceAttribution">
+            <span className="sourceAttributionLabel">From</span>
+            <span className="sourceAttributionText">
+              {collectionSourceAttribution.count} public lists
+            </span>
+          </div>
+        ) : null}
+        {(trip?.shareId || trip?.isShared) && trip?.ownerDisplayName && (
+          <div className="sharedByLine">
+            Shared by {formatSharedBy(trip.ownerDisplayName)}
+          </div>
         )}
       </div>
     </div>
@@ -504,7 +623,6 @@ export default function TripDetail() {
   const [itemShare, setItemShare] = useState(null);
   const [itemShareMsg, setItemShareMsg] = useState("");
   const [viewMode, setViewMode] = useState("list");
-  const [searchText, setSearchText] = useState("");
   const [domainInclude, setDomainInclude] = useState("");
   const [domainExclude, setDomainExclude] = useState("");
   const [fileType, setFileType] = useState("all");
@@ -540,6 +658,7 @@ export default function TripDetail() {
   const linkCount = trip?.items?.length || 0;
   const collectionShareLabel = getCollectionShareLabel(trip?.type);
   const hasItems = trip?.items?.length > 0;
+  const backTo = trip?.type ? `/trips?category=${trip.type}` : "/trips";
   const shareUrl = trip?.shareId ? `${window.location.origin}/share/${trip.shareId}` : "";
   const rawShareBase = process.env.REACT_APP_SHARE_ORIGIN || window.location.origin;
   const shareBase = rawShareBase.replace(/\/+$/, "");
@@ -563,7 +682,6 @@ export default function TripDetail() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    setSearchText(params.get("q") || "");
     setTagFilter(params.get("tag") || "");
     setMentionFilter(params.get("mention") || "");
     setDomainInclude(params.get("include") || "");
@@ -602,7 +720,6 @@ export default function TripDetail() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams();
-    if (searchText.trim()) params.set("q", searchText.trim());
     if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     if (mentionFilter.trim()) params.set("mention", mentionFilter.trim());
     if (domainInclude.trim()) params.set("include", domainInclude.trim());
@@ -614,7 +731,6 @@ export default function TripDetail() {
     const url = `${window.location.pathname}${next ? `?${next}` : ""}`;
     window.history.replaceState({}, "", url);
   }, [
-    searchText,
     tagFilter,
     mentionFilter,
     domainInclude,
@@ -672,24 +788,13 @@ export default function TripDetail() {
   }, [trip, sortMode]);
 
   const filteredState = useMemo(() => {
-    const query = normalizeText(searchText);
     const includeList = parseDomainList(domainInclude).map((item) => item.toLowerCase());
     const excludeList = parseDomainList(domainExclude).map((item) => item.toLowerCase());
     const tagQuery = normalizeText(tagFilter);
     const mentionQuery = normalizeText(mentionFilter);
 
     let filtered = sortedItems.filter((item) => {
-      const title = normalizeText(item.title || "");
-      const url = normalizeText(item.airbnbUrl || "");
       const domain = normalizeText(item.domain || getDomain(item.airbnbUrl));
-      const note = normalizeText(item.note || "");
-      const matchesQuery =
-        !query ||
-        title.includes(query) ||
-        url.includes(query) ||
-        domain.includes(query) ||
-        note.includes(query);
-      if (!matchesQuery) return false;
       if (includeList.length > 0 && !includeList.includes(domain)) return false;
       if (excludeList.length > 0 && excludeList.includes(domain)) return false;
       if (fileType !== "all" && getFileTypeFromUrl(item.airbnbUrl) !== fileType) return false;
@@ -723,7 +828,6 @@ export default function TripDetail() {
     return { items: deduped, duplicateCount, total: filtered.length };
   }, [
     sortedItems,
-    searchText,
     domainInclude,
     domainExclude,
     fileType,
@@ -819,7 +923,6 @@ export default function TripDetail() {
   }, [trip?.items]);
 
   const hasActiveFilters =
-    !!searchText.trim() ||
     !!tagFilter.trim() ||
     !!mentionFilter.trim() ||
     !!domainInclude.trim() ||
@@ -973,7 +1076,6 @@ export default function TripDetail() {
   }
 
   function clearFilters() {
-    setSearchText("");
     setDomainInclude("");
     setDomainExclude("");
     setFileType("all");
@@ -1508,6 +1610,8 @@ export default function TripDetail() {
     );
     const actionLabel = primaryActionLabel(action);
     const isChosen = item.decisionState === "chosen" || !!item.chosen;
+    const itemPreviewImage = resolveItemPreviewImage(item);
+    const thumbFallback = (titleParts.main || domainLabel || "S").charAt(0).toUpperCase();
 
     return (
       <div
@@ -1528,6 +1632,13 @@ export default function TripDetail() {
             </label>
           )}
           <div className="itemHeaderRow">
+            <div className="itemPreviewThumb" aria-hidden="true">
+              {itemPreviewImage ? (
+                <img src={itemPreviewImage} alt="" loading="lazy" />
+              ) : (
+                <span>{thumbFallback}</span>
+              )}
+            </div>
             <div className="itemTitleBlock">
               {editingId === item.id ? (
                 <input
@@ -1689,7 +1800,7 @@ export default function TripDetail() {
 
   if (!user && !loading) {
     return (
-      <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <div className="page tripsPage tripDetailPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
         <AppShell
           sidebar={
             <SidebarNav
@@ -1709,8 +1820,8 @@ export default function TripDetail() {
             <TopBar
               title="Collection"
               subtitle="Sign in to view and edit your collections."
-              searchValue={searchText}
-              onSearchChange={setSearchText}
+              searchValue=""
+              onSearchChange={() => {}}
               onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
               actions={
                 !user ? (
@@ -1736,7 +1847,7 @@ export default function TripDetail() {
   // If trip doesn't exist (bad URL / deleted), show a friendly message
   if (!trip) {
     return (
-      <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+      <div className="page tripsPage tripDetailPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
         <AppShell
           sidebar={
             <SidebarNav
@@ -1756,8 +1867,8 @@ export default function TripDetail() {
             <TopBar
               title="Collection"
               subtitle="That collection doesn’t exist."
-              searchValue={searchText}
-              onSearchChange={setSearchText}
+              searchValue=""
+              onSearchChange={() => {}}
               onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
               actions={
                 !user ? (
@@ -1788,7 +1899,7 @@ export default function TripDetail() {
   }
 
   return (
-    <div className="page tripsPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
+    <div className="page tripsPage tripDetailPage collectionsShell min-h-screen app-bg text-[rgb(var(--text))]">
       <AppShell
         sidebar={
           <SidebarNav
@@ -1808,8 +1919,8 @@ export default function TripDetail() {
           <TopBar
             title={trip?.name || "Collection"}
             subtitle={collectionSubtitle}
-            searchValue={searchText}
-            onSearchChange={setSearchText}
+            searchValue=""
+            onSearchChange={() => {}}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
             actions={
               !user ? (
@@ -1828,62 +1939,51 @@ export default function TripDetail() {
           trip={trip}
           onShare={handleToggleShare}
           showShare={hasItems}
+          backTo={backTo}
+          collectionSubtitle={collectionSubtitle}
+          updatedAt={updatedAt}
+          linkCount={linkCount}
+          collectionSourceAttribution={collectionSourceAttribution}
         />
 
         <div className="detailCollectionBody">
           <div className="detailHeader hasCover">
-            <div className="detailHeaderBar">
-            <Link
-              className="miniBtn linkBtn"
-              to={trip?.type ? `/trips?category=${trip.type}` : "/trips"}
-            >
-              ← Collections
-            </Link>
-            </div>
-
-            <div className="detailCoverBody">
-              <div className="detailCoverTitle">{trip?.name}</div>
-              <div className="detailCoverSubtitle">{collectionSubtitle}</div>
-              <div className="detailCoverMeta">
-                {linkCount} link{linkCount === 1 ? "" : "s"} · Updated {updatedAt} ·{" "}
-                {collectionSubtitle}
-              </div>
-              {collectionSourceAttribution?.type === "single" && collectionSourceAttribution.source ? (
-                <div className="sourceAttributionRow collectionSourceAttribution">
-                  <span className="sourceAttributionLabel">From</span>
-                  <span className="sourceAttributionOwner">
-                    {collectionSourceAttribution.source.ownerLabel}
-                  </span>
-                  <span className="sourceAttributionDivider">•</span>
-                  {collectionSourceAttribution.source.listPath ? (
-                    <Link className="sourceAttributionLink" to={collectionSourceAttribution.source.listPath}>
-                      {collectionSourceAttribution.source.listLabel}
-                    </Link>
-                  ) : (
-                    <span className="sourceAttributionText">
-                      {collectionSourceAttribution.source.listLabel}
-                    </span>
-                  )}
-                </div>
-              ) : null}
-              {collectionSourceAttribution?.type === "multiple" ? (
-                <div className="sourceAttributionRow collectionSourceAttribution">
-                  <span className="sourceAttributionLabel">From</span>
-                  <span className="sourceAttributionText">
-                    {collectionSourceAttribution.count} public lists
-                  </span>
-                </div>
-              ) : null}
-              {(trip.shareId || trip.isShared) && trip.ownerDisplayName && (
-                <div className="sharedByLine">
-                  Shared by {formatSharedBy(trip.ownerDisplayName)}
-                </div>
-              )}
-            </div>
-
             <div className="detailSectionDivider" />
 
             <div className="detailHeaderActions">
+              <div className="detailAddLinkRow">
+                <span className="detailAddLinkIcon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <path d="M16.5 16.5L21 21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <input
+                  className="detailAddLinkInput"
+                  type="url"
+                  placeholder="Paste a link or add anything you want to stash..."
+                  value={addLinkInput}
+                  onChange={(e) => setAddLinkInput(e.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleAddLinkToCollection();
+                    }
+                  }}
+                  disabled={addLinkLoading}
+                  aria-label="Paste link to collection"
+                />
+                <button
+                  className="detailAddLinkBtn"
+                  type="button"
+                  onClick={handleAddLinkToCollection}
+                  disabled={addLinkLoading}
+                  aria-label={addLinkLoading ? "Adding link" : "Add link"}
+                >
+                  {addLinkLoading ? "…" : "+"}
+                </button>
+              </div>
+
             <div className="detailToolbar">
               <div className="toolbarLeft">
                 <div className="sortRow inline">
@@ -1905,48 +2005,7 @@ export default function TripDetail() {
               <div className="toolbarRight" />
             </div>
 
-            <div className="detailAddLinkRow">
-              <input
-                className="input detailAddLinkInput"
-                type="url"
-                placeholder="Paste a link to add directly to this collection"
-                value={addLinkInput}
-                onChange={(e) => setAddLinkInput(e.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleAddLinkToCollection();
-                  }
-                }}
-                disabled={addLinkLoading}
-                aria-label="Add link to collection"
-              />
-              <button
-                className="miniBtn detailAddLinkBtn"
-                type="button"
-                onClick={handleAddLinkToCollection}
-                disabled={addLinkLoading}
-              >
-                {addLinkLoading ? "Adding…" : "Add link"}
-              </button>
-            </div>
-
             <div className="filterRow">
-              <div className="searchWrap">
-                <input
-                  className="input searchInput"
-                  type="search"
-                  placeholder="Search title, URL, domain, notes"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  aria-label="Search collection"
-                />
-                {searchText && (
-                  <button className="miniBtn ghostBtn" type="button" onClick={() => setSearchText("")}>
-                    Clear
-                  </button>
-                )}
-              </div>
               <button
                 className={`miniBtn ${filterOpen ? "active" : ""}`}
                 type="button"
@@ -2071,7 +2130,7 @@ export default function TripDetail() {
             <div className="emptyState">
               <div className="emptyTitle">Nothing found</div>
               <div className="emptyText">
-                Try another search or clear filters.
+                Try different filters or clear filters.
               </div>
               {hasActiveFilters && (
                 <button className="miniBtn" type="button" onClick={clearFilters}>

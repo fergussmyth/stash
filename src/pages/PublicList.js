@@ -804,12 +804,18 @@ export default function PublicList() {
 
               <div className="publicListItems">
                 {items.length === 0 ? (
-                  <div className="collectionsEmpty">
-                    <div className="collectionsEmptyIcon" aria-hidden="true">
-                      ✦
+                  <div className="publicListEmpty" role="status" aria-live="polite">
+                    <div className="publicListEmptyGlow" aria-hidden="true" />
+                    <div className="publicListEmptyIcon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 3l1.8 4.6L18 9.4l-4.2 1.7L12 16l-1.8-4.9L6 9.4l4.2-1.8L12 3z"
+                          fill="currentColor"
+                        />
+                      </svg>
                     </div>
-                    <div className="collectionsEmptyTitle">No items yet</div>
-                    <div className="collectionsEmptyText">This collection is still being curated.</div>
+                    <div className="publicListEmptyTitle">No items yet</div>
+                    <div className="publicListEmptyText">This collection is still being curated.</div>
                   </div>
                 ) : (
                   items.map((item, index) => {

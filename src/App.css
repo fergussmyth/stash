@@ -6328,23 +6328,86 @@ h1 span {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .detailAddLinkRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  width: 100%;
+  min-height: 50px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(8, 16, 38, 0.95) 0%, rgba(7, 14, 32, 0.95) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(80, 110, 170, 0.22),
+    0 8px 22px rgba(2, 6, 23, 0.35);
+  overflow: hidden;
+}
+
+.detailAddLinkIcon {
+  width: 18px;
+  height: 18px;
+  margin-left: 14px;
+  color: rgba(148, 163, 184, 0.65);
+  flex: 0 0 auto;
+}
+
+.detailAddLinkIcon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .detailAddLinkInput {
   flex: 1;
-  min-width: 260px;
+  min-width: 0;
+  height: 50px;
+  border: none;
+  background: transparent;
+  padding: 0 12px;
+  color: rgba(241, 245, 249, 0.95);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.detailAddLinkInput::placeholder {
+  color: rgba(148, 163, 184, 0.65);
+}
+
+.detailAddLinkInput:focus {
+  outline: none;
+}
+
+.detailAddLinkInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .detailAddLinkBtn {
-  white-space: nowrap;
+  width: 52px;
+  min-width: 52px;
+  height: 50px;
+  border: none;
+  border-left: 1px solid rgba(80, 110, 170, 0.24);
+  border-radius: 0;
+  background: transparent;
+  color: rgba(191, 219, 254, 0.95);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.detailAddLinkBtn:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.detailAddLinkBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .searchWrap {
@@ -7858,6 +7921,15 @@ h1 span {
   gap: 10px;
 }
 
+.tripDetailPage .collectionsTopbarSearch {
+  display: none;
+}
+
+.tripDetailPage .collectionsTopbarActions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
 .reviewPage .collectionsTopbarSearch {
   display: none;
 }
@@ -7972,6 +8044,7 @@ h1 span {
   width: 100%;
   max-width: 1260px;
   margin: 0 auto;
+  min-width: 0;
 }
 
 .exploreMain {
@@ -7984,6 +8057,7 @@ h1 span {
 .exploreSectionBlock {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .exploreFilters {
@@ -8043,6 +8117,7 @@ h1 span {
 
 .trendingWrap {
   position: relative;
+  min-width: 0;
 }
 
 .trendingRow {
@@ -8054,9 +8129,12 @@ h1 span {
   overflow-y: hidden;
   padding: 4px 2px 4px;
   scrollbar-width: none;
-  scroll-snap-type: x proximity;
+  scroll-snap-type: x mandatory;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  min-width: 0;
+  width: 100%;
 }
 
 .trendingRow::-webkit-scrollbar {
@@ -8065,6 +8143,7 @@ h1 span {
 
 .trendingRow > * {
   scroll-snap-align: start;
+  scroll-snap-stop: always;
 }
 
 .trendingRow.skeletonRow {
@@ -8305,11 +8384,13 @@ h1 span {
   grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+  min-width: 0;
 }
 
 .exploreNewColumn {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .exploreFollowingToggle {
@@ -8459,6 +8540,7 @@ h1 span {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  min-width: 0;
 }
 
 .exploreFeedCard {
@@ -8469,6 +8551,7 @@ h1 span {
   overflow: hidden;
   box-shadow: 0 14px 26px rgba(0, 0, 0, 0.34);
   min-height: 150px;
+  min-width: 0;
 }
 
 .exploreFeedSaveBtn {

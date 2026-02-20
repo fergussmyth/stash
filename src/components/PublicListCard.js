@@ -33,6 +33,7 @@ export default function PublicListCard({
   const coverImageUrl = list.cover_image_url || list.preview_image_url || "";
   const coverSeed = useMemo(() => `${list.id || ""}-${list.title || ""}`, [list.id, list.title]);
   const fallbackGradient = useMemo(() => makeFallbackGradient(coverSeed), [coverSeed]);
+  const subtitle = String(list.subtitle || "").trim();
 
   const isGradientCover =
     (coverImageUrl || "").startsWith("linear-gradient") ||
@@ -48,25 +49,22 @@ export default function PublicListCard({
   const to = ownerHandle && list?.slug ? `/@${ownerHandle}/${list.slug}` : "";
   const ownerAvatarUrl = String(list?.owner_avatar_url || "").trim();
   const ownerDisplayName = String(list?.owner_display_name || ownerHandle || "Stash user");
+  const listTitle = String(list.title || "Untitled list");
 
   const cardContent = (
-    <>
-      <div
-        className={`collectionCardCover ${compact ? "compact" : ""} ${coverLoaded ? "isLoaded" : ""}`}
-        style={{ backgroundImage: coverBackground }}
-        aria-hidden="true"
-      >
-        {isImageCover && (
-          <img
-            src={coverImageUrl}
-            alt=""
-            loading="lazy"
-            onLoad={() => setCoverLoaded(true)}
-            onError={() => setCoverLoaded(true)}
-          />
-        )}
-      </div>
-      <div className="collectionCardBody">
+    <div className={`profileShowcaseCardMedia ${compact ? "compact" : ""}`} style={{ backgroundImage: coverBackground }}>
+      {isImageCover && (
+        <img
+          src={coverImageUrl}
+          alt=""
+          loading="lazy"
+          onLoad={() => setCoverLoaded(true)}
+          onError={() => setCoverLoaded(true)}
+          style={{ opacity: coverLoaded ? 1 : 0, transition: "opacity 0.25s ease" }}
+        />
+      )}
+      <div className="profileShowcaseCardShade" />
+      <div className="profileShowcaseCardBody">
         {showCreator ? (
           <div className="publicListCreatorRow">
             <span className="publicListCreatorAvatar" aria-hidden="true">
@@ -81,28 +79,23 @@ export default function PublicListCard({
             </span>
           </div>
         ) : null}
-        <div className="publicListTitleRow">
-          <div className="tripName">{list.title || "Untitled list"}</div>
-          <span className="tripCategory">{sectionLabel(list.section)}</span>
+        <div className="profileShowcaseCardTitle">{listTitle}</div>
+        <div className={`profileShowcaseCardMeta publicProfileCardMeta ${subtitle ? "" : "isFallback"}`}>
+          {subtitle || "Public collection"}
         </div>
-        {list.subtitle ? <div className="publicListSubtitle">{list.subtitle}</div> : null}
-        <div className="tripMetaLine">
-          Saved by {saveCount}
-          {list.is_ranked && list.ranked_size ? ` · Top ${list.ranked_size}` : ""}
+        <div className="profileShowcaseCardFooter">
+          <span className="profileShowcaseCardTag">{sectionLabel(list.section)}</span>
+          <span className="profileShowcaseCardCount">{saveCount.toLocaleString()} saves</span>
         </div>
       </div>
-    </>
+    </div>
   );
 
   const canSave = typeof onSave === "function";
 
   if (to && !canSave) {
     return (
-      <Link
-        className={`collectionCard publicListCard ${compact ? "compact" : ""}`}
-        to={to}
-        aria-label={list.title || "List"}
-      >
+      <Link className={`profileShowcaseCard publicProfileCardLink ${compact ? "compact" : ""}`} to={to} aria-label={listTitle}>
         {cardContent}
       </Link>
     );
@@ -110,16 +103,13 @@ export default function PublicListCard({
 
   if (to && canSave) {
     return (
-      <article
-        className={`collectionCard publicListCard withActions ${compact ? "compact" : ""}`}
-        aria-label={list.title || "List"}
-      >
-        <Link className="publicListCardMain" to={to} aria-label={list.title || "List"}>
+      <article className={`profileShowcaseCard publicListCard withActions ${compact ? "compact" : ""}`} aria-label={listTitle}>
+        <Link className="publicProfileCardLink" to={to} aria-label={listTitle}>
           {cardContent}
         </Link>
         <div className="publicListCardActions">
           <button className={isSaved ? "miniBtn active" : "miniBtn blue"} type="button" onClick={onSave} disabled={isSaving}>
-            {isSaving ? "Working…" : isSaved ? "Saved" : "Save"}
+            {isSaving ? "Working..." : isSaved ? "Saved" : "Save"}
           </button>
           {isSaved && typeof onViewSaved === "function" ? (
             <button className="miniBtn" type="button" onClick={onViewSaved} disabled={isSaving}>
@@ -132,15 +122,12 @@ export default function PublicListCard({
   }
 
   return (
-    <article
-      className={`collectionCard publicListCard withActions ${compact ? "compact" : ""}`}
-      aria-label={list.title || "List"}
-    >
-      <div className="publicListCardMain">{cardContent}</div>
+    <article className={`profileShowcaseCard publicListCard withActions ${compact ? "compact" : ""}`} aria-label={listTitle}>
+      <div className="publicProfileCardLink">{cardContent}</div>
       {canSave ? (
         <div className="publicListCardActions">
           <button className={isSaved ? "miniBtn active" : "miniBtn blue"} type="button" onClick={onSave} disabled={isSaving}>
-            {isSaving ? "Working…" : isSaved ? "Saved" : "Save"}
+            {isSaving ? "Working..." : isSaved ? "Saved" : "Save"}
           </button>
           {isSaved && typeof onViewSaved === "function" ? (
             <button className="miniBtn" type="button" onClick={onViewSaved} disabled={isSaving}>

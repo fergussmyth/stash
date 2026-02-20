@@ -6,7 +6,7 @@ import AppShell from "../components/AppShell";
 import SidebarNav from "../components/SidebarNav";
 import TopBar from "../components/TopBar";
 import TrendingListCard from "../components/TrendingListCard";
-import { fetchFollowingFeed, fetchTrendingLists } from "../lib/socialDiscovery";
+import { fetchTrendingLists } from "../lib/socialDiscovery";
 import { getSavedListsByIds, savePublicListToStash } from "../lib/socialSave";
 import stashLogo from "../assets/icons/stash-favicon.png";
 import userIcon from "../assets/icons/user.png";
@@ -238,7 +238,6 @@ export default function Home() {
   const stashWrapRef = useRef(null);
   const stashInputRef = useRef(null);
   const [feedLists, setFeedLists] = useState([]);
-  const [feedMode, setFeedMode] = useState("following");
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [feedHasMore, setFeedHasMore] = useState(false);
@@ -428,12 +427,8 @@ export default function Home() {
     return tripsForSelect.find((trip) => (trip.name || "").toLowerCase() === query) || null;
   }, [stashQuery, tripsForSelect]);
 
-  const feedTitle = feedMode === "following" ? "From people you follow" : "Trending now";
-  const feedSub =
-    feedMode === "following"
-      ? "Newest public lists from creators you follow."
-      : "No followed activity yet, so these are trending this week.";
-  const showTrendingCarousel = feedMode === "trending";
+  const feedTitle = "Trending now";
+  const feedSub = "Popular public lists this week.";
 
   function mergeUniqueLists(prevRows, nextRows) {
     const seen = new Set(prevRows.map((row) => row.id));
@@ -454,7 +449,6 @@ export default function Home() {
 
     if (!viewerUserId) {
       setFeedLists([]);
-      setFeedMode("following");
       setFeedLoading(false);
       setFeedLoadingMore(false);
       setFeedHasMore(false);
@@ -469,22 +463,6 @@ export default function Home() {
     setFeedError("");
 
     (async () => {
-      const followingResult = await fetchFollowingFeed({
-        viewerUserId,
-        limit: FEED_PAGE_SIZE,
-        offset: 0,
-      });
-
-      if (!active || feedRequestRef.current !== requestId) return;
-      const followingLists = followingResult.lists || [];
-      if (followingLists.length > 0) {
-        setFeedMode("following");
-        setFeedLists(followingLists);
-        setFeedHasMore(!!followingResult.hasMore);
-        setFeedLoading(false);
-        return;
-      }
-
       const trendingResult = await fetchTrendingLists({
         section: "all",
         search: "",
@@ -493,13 +471,9 @@ export default function Home() {
       });
 
       if (!active || feedRequestRef.current !== requestId) return;
-      setFeedMode("trending");
       setFeedLists(trendingResult.lists || []);
       setFeedHasMore(!!trendingResult.hasMore);
       setFeedLoading(false);
-      if (followingResult.error) {
-        setFeedError("Could not load followed activity. Showing trending.");
-      }
     })().catch(() => {
       if (!active || feedRequestRef.current !== requestId) return;
       setFeedLists([]);
@@ -556,19 +530,12 @@ export default function Home() {
     const offset = feedLists.length;
 
     try {
-      const result =
-        feedMode === "following"
-          ? await fetchFollowingFeed({
-              viewerUserId,
-              limit: FEED_PAGE_SIZE,
-              offset,
-            })
-          : await fetchTrendingLists({
-              section: "all",
-              search: "",
-              limit: FEED_PAGE_SIZE,
-              offset,
-            });
+      const result = await fetchTrendingLists({
+        section: "all",
+        search: "",
+        limit: FEED_PAGE_SIZE,
+        offset,
+      });
 
       if (result.error) {
         setFeedError("Could not load more right now.");
@@ -1323,13 +1290,7 @@ export default function Home() {
                 {feedError ? <div className="warning">{feedError}</div> : null}
 
                 {feedLoading ? (
-                  <div
-                    className={
-                      showTrendingCarousel
-                        ? "trendingRow homeFeedGrid skeletonRow"
-                        : "collectionsGrid homeFeedGrid"
-                    }
-                  >
+                  <div className="trendingRow homeFeedGrid skeletonRow">
                     {Array.from({ length: 6 }).map((_, index) => (
                       <div key={index} className="trendingListSkeleton" />
                     ))}
@@ -1351,13 +1312,7 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
-                    <div
-                      className={
-                        showTrendingCarousel
-                          ? "trendingRow homeFeedGrid"
-                          : "collectionsGrid homeFeedGrid"
-                      }
-                    >
+                    <div className="trendingRow homeFeedGrid">
                       {feedLists.map((list) => (
                         <TrendingListCard
                           key={list.id}

@@ -756,7 +756,11 @@ export default function Explore() {
 
                 <div className="trendingWrap">
                   {loadingTrending ? (
-                    <div ref={trendingScrollerRef} className="trendingRow skeletonRow" aria-hidden="true">
+                    <div
+                      ref={trendingScrollerRef}
+                      className="trendingRow skeletonRow"
+                      aria-hidden="true"
+                    >
                       {Array.from({ length: 5 }).map((_, index) => (
                         <div key={`trend-skeleton-${index}`} className="trendingListSkeleton" />
                       ))}
@@ -767,7 +771,12 @@ export default function Explore() {
                       <div className="collectionsEmptyText">Try another section or search term.</div>
                     </div>
                   ) : (
-                    <div ref={trendingScrollerRef} className="trendingRow" role="list" aria-label="Trending collections">
+                    <div
+                      ref={trendingScrollerRef}
+                      className="trendingRow"
+                      role="list"
+                      aria-label="Trending collections"
+                    >
                       {trendingLists.map((list) => (
                         <TrendingListCard
                           key={`trending-${list.id}`}
